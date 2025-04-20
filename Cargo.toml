@@ -1,0 +1,13 @@
+[package]
+name = "ure"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cgmath = "0.18.0"
+rand = "0.9.1"
+
+[features]
+default = ["2D"]
+2D = []
+3D = []

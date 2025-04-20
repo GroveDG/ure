@@ -18,15 +18,12 @@ impl App {
         let window = event_loop
             .create_window(Window::default_attributes())
             .unwrap();
-        println!("{:?}", self.windows);
         self.windows.lock().unwrap().insert(window.id(), window);
-        println!("{:?}", self.windows);
     }
 }
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        println!("Resumed");
         self.new_window(event_loop);
     }
 

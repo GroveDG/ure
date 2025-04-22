@@ -31,5 +31,6 @@ impl UIDs {
     }
 }
 
+pub mod sdl;
 pub mod tf;
 pub mod tree;

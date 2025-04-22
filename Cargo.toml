@@ -6,7 +6,8 @@ edition = "2024"
 [dependencies]
 cgmath = "0.18.0"
 rand = "0.9.1"
-winit = "0.30.9"
+sdl2 = "0.37.0"
+softbuffer = "0.4.6"
 
 [features]
 default = ["2D"]

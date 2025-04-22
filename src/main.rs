@@ -1,49 +1,63 @@
 use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    thread::{sleep, spawn},
+    thread::sleep,
     time::{Duration, Instant},
 };
 
-use app::App;
-use sys::{UIDs, tf::Space2D, tree::Tree};
-use winit::{event_loop::EventLoop, window::{Window, WindowId}};
+use sdl2::{event::Event, pixels::Color};
+use sys::{
+    UIDs,
+    sdl::{Events, Windows},
+    tf::Space2D,
+    tree::Tree,
+};
 
-mod app;
 mod sys;
 
-// const FRAME_TIME: Duration = Duration::new(0, 0_016_666_667);
-const FRAME_TIME: Duration = Duration::new(0, 0_166_666_667);
+const FRAME_PERIOD: Duration = Duration::new(0, 0_016_666_667);
 
 fn main() {
-    let event_loop = EventLoop::builder().build().unwrap();
-    let windows = Arc::new(Mutex::new(HashMap::new()));
-    let mut app = App::new(windows.clone());
-    spawn(|| game(windows));
-    event_loop.run_app(&mut app);
-}
-
-fn game(windows: Arc<Mutex<HashMap<WindowId, Window>>>) {
+    // Initialize UID system
     let mut uids: UIDs = UIDs::new().expect("UID RNG failed to intitialize");
+
+    // Initialize SDL
+    let sdl = sdl2::init().unwrap();
+    let mut windows = Windows::new(&sdl).unwrap();
+    let mut events = Events::new(&sdl).unwrap();
+
+    // Initialize game systems
     let mut tree: Tree = Tree::new(uids.new_uid());
     let mut transform: Space2D = Default::default();
 
-    let mut prev_frame_start = Instant::now();
-    loop {
-        let start = Instant::now();
-        let delta = start - prev_frame_start;
+    // Create window
+    windows.new_window(&mut uids, "Window", 640, 480);
 
+    // Store previous frame start for timing
+    let mut last_start = Instant::now();
+    'game: loop {
+        // Calculate frame timing
+        let start = Instant::now();
+        let delta = start - last_start;
+
+        // Poll events
+        for event in events.poll() {
+            match event {
+                Event::Quit { .. } => break 'game,
+                _ => {}
+            }
+        }
+
+        // Draw frame
+        // windows.request_redraws();
+
+        // Calculate CPU time spent
         let end = Instant::now();
         let cpu_time = end - start;
-        let remaining = FRAME_TIME.saturating_sub(cpu_time);
-        sleep(remaining);
+        
+        // Minimize updates
+        let remaining = FRAME_PERIOD.saturating_sub(cpu_time);
+        sleep(remaining); // Sleep slightly overshoots frame period
 
-        prev_frame_start = start;
-        println!("{:?}", delta);
-
-        // Redraw all windows
-        for window in windows.lock().unwrap().values() {
-            window.request_redraw();
-        }
+        last_start = start;
+        // println!("{:?}", cpu_time);
     }
 }

@@ -1,8 +1,4 @@
-use sdl2::{
-    Sdl, VideoSubsystem,
-    render::Canvas,
-    video::Window,
-};
+use sdl2::{Sdl, VideoSubsystem, render::Canvas, video::Window};
 
 use crate::sys::{Components, UID, UIDs};
 
@@ -20,11 +16,17 @@ impl Windows {
     }
     pub fn new_window(&mut self, uids: &mut UIDs, title: &str, width: u32, height: u32) -> UID {
         let uid = uids.new_uid();
-        let mut window = self.video.window(title, width, height).build().unwrap();
-        
+        let mut window = self
+            .video
+            .window(title, width, height)
+            .position_centered()
+            .opengl()
+            .build()
+            .unwrap();
+
         // Sensible Window defaults
         window.set_resizable(true);
-        
+
         let canvas = window.into_canvas().build().unwrap();
         self.canvases.insert(uid, canvas);
         uid

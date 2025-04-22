@@ -31,7 +31,7 @@ fn main() {
     // Create window
     windows.new_window(&mut uids, "Window", 640, 480);
 
-    // Store previous frame start for timing
+    // Store the start time of the previous frame
     let mut last_start = Instant::now();
     'game: loop {
         // Calculate frame timing
@@ -59,6 +59,5 @@ fn main() {
         sleep(remaining); // Sleep slightly overshoots frame period
 
         last_start = start;
-        // println!("{:?}", cpu_time);
     }
 }

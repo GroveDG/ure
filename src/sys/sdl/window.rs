@@ -16,16 +16,16 @@ impl Windows {
     }
     pub fn new_window(&mut self, uids: &mut UIDs, title: &str, width: u32, height: u32) -> UID {
         let uid = uids.new_uid();
-        let mut window = self
+        let window = self
             .video
             .window(title, width, height)
+            // Sensible Window defaults.
             .position_centered()
-            .opengl()
+            .opengl() // In future, create Vulkan feature.
+            .resizable()
+            // Build window.
             .build()
             .unwrap();
-
-        // Sensible Window defaults
-        window.set_resizable(true);
 
         let canvas = window.into_canvas().build().unwrap();
         self.canvases.insert(uid, canvas);

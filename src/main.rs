@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use sdl2::{event::Event, pixels::Color};
+use sdl2::event::Event;
 use sys::{
     UIDs,
     sdl::{Events, Windows},
@@ -47,7 +47,8 @@ fn main() {
         }
 
         // Draw frame
-        // windows.request_redraws();
+        windows.clear();
+        windows.present();
 
         // Calculate CPU time spent
         let end = Instant::now();

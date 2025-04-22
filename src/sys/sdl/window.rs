@@ -29,4 +29,16 @@ impl Windows {
         self.canvases.insert(uid, canvas);
         uid
     }
+    /// See [Canvas::clear].
+    pub fn clear(&mut self) {
+        for canvas in self.canvases.values_mut() {
+            canvas.clear();
+        }
+    }
+    /// See [Canvas::present].
+    pub fn present(&mut self) {
+        for canvas in self.canvases.values_mut() {
+            canvas.present();
+        }
+    }
 }

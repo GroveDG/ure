@@ -1,35 +1,66 @@
 use std::{
+    sync::{Arc, Mutex},
     thread::sleep,
     time::{Duration, Instant},
 };
 
+use call::Call;
+use cgmath::SquareMatrix;
 use sdl2::event::Event;
 use sys::{
-    UIDs,
+    UID, UIDs,
     sdl::{Events, Windows},
-    tf::Space2D,
+    tf::{Matrix2D, Space2D},
     tree::Tree,
 };
 
+mod call;
 mod sys;
 
 const FRAME_PERIOD: Duration = Duration::new(0, 0_016_666_667);
 
 fn main() {
     // Initialize UID system
-    let mut uids: UIDs = UIDs::new().expect("UID RNG failed to intitialize");
+    let mut uids = Arc::new(Mutex::new(UIDs::new().unwrap()));
 
-    // Initialize SDL
+    // Initialize SDL systems
     let sdl = sdl2::init().unwrap();
-    let mut windows = Windows::new(&sdl).unwrap();
+    let windows = Arc::new(Mutex::new(Windows::new(&sdl).unwrap()));
     let mut events = Events::new(&sdl).unwrap();
 
     // Initialize game systems
-    let mut tree: Tree = Tree::new(uids.new_uid());
-    let mut transform: Space2D = Default::default();
+    let root = uids.lock().unwrap().add();
+    let tree = Arc::new(Mutex::new(Tree::default()));
+    let space = Arc::new(Mutex::new(Space2D::default()));
 
-    // Create window
-    windows.new_window(&mut uids, "Window", 640, 480);
+    // Initialize mass calls
+    // If you call these functions while one of them is locked,
+    // the application will become deadlocked and freeze.
+    let mut delete = {
+        let uids = Arc::clone(&uids);
+        let tree = Arc::clone(&tree);
+        let space = Arc::clone(&space);
+        let windows = Arc::clone(&windows);
+        Call::new(Box::new(move |batch: &mut Vec<UID>| {
+            // Lock before call for performance.
+            let mut uids = uids.lock().unwrap();
+            let mut tree = tree.lock().unwrap();
+            let mut space = space.lock().unwrap();
+            let mut windows = windows.lock().unwrap();
+            // Call
+            for args in batch.drain(..) {
+                uids.delete(&args);
+                tree.delete(&args); // Let tree add children to batch
+                space.delete(&args);
+                windows.delete(&args);
+            }
+        }))
+    };
+
+    // Init root
+    tree.lock().unwrap().insert(root, None).unwrap();
+    space.lock().unwrap().insert(root, Matrix2D::identity());
+    windows.lock().unwrap().insert(root, "Window", 640, 480);
 
     // Store the start time of the previous frame
     let mut last_start = Instant::now();
@@ -46,15 +77,25 @@ fn main() {
             }
         }
 
-        // Draw frame
-        windows.clear();
-        windows.present();
+        // 
+
+        // Windowing system
+        {
+            let mut windows = windows.lock().unwrap();
+            // If no windows, quit.
+            if windows.is_empty() {
+                break 'game;
+            }
+            // Draw frame
+            windows.clear();
+            windows.present();
+        }
 
         // Calculate CPU time spent
         let end = Instant::now();
         let cpu_time = end - start;
-        
-        // Minimize updates
+
+        // Regulate updates
         let remaining = FRAME_PERIOD.saturating_sub(cpu_time);
         sleep(remaining); // Sleep slightly overshoots frame period
 

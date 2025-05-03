@@ -1,4 +1,4 @@
-use super::Components;
+use super::{Components, UID};
 use cgmath::SquareMatrix;
 
 type P = f32;
@@ -14,13 +14,21 @@ impl<M: SquareMatrix<Scalar = P>> Default for Space<M> {
         }
     }
 }
+impl<M: SquareMatrix<Scalar = P>> Space<M> {
+    pub fn insert(&mut self, uid: UID, matrix: M) {
+        self.transforms.insert(uid, matrix);
+    }
+    pub fn delete(&mut self, uid: &UID) {
+        self.transforms.remove(uid);
+    }
+}
 
 #[cfg(feature = "2D")]
-mod tf2d;
+mod e2;
 #[cfg(feature = "2D")]
-pub use tf2d::*;
+pub use e2::*;
 
 #[cfg(feature = "3D")]
-mod tf3d;
+mod e3;
 #[cfg(feature = "3D")]
-pub use tf3d::*;
+pub use e3::*;

@@ -1,6 +1,6 @@
 use sdl2::{Sdl, VideoSubsystem, render::Canvas, video::Window};
 
-use crate::sys::{Components, UID, UIDs};
+use crate::sys::{Components, UID};
 
 pub struct Windows {
     video: VideoSubsystem,
@@ -14,8 +14,8 @@ impl Windows {
             canvases: Default::default(),
         })
     }
-    pub fn new_window(&mut self, uids: &mut UIDs, title: &str, width: u32, height: u32) -> UID {
-        let uid = uids.new_uid();
+    /// Create a new window on the entity.
+    pub fn insert(&mut self, uid: UID, title: &str, width: u32, height: u32) -> UID {
         let window = self
             .video
             .window(title, width, height)
@@ -30,6 +30,12 @@ impl Windows {
         let canvas = window.into_canvas().build().unwrap();
         self.canvases.insert(uid, canvas);
         uid
+    }
+    pub fn delete(&mut self, uid: &UID) {
+        self.canvases.remove(uid);
+    }
+    pub fn is_empty(&self) -> bool {
+        self.canvases.is_empty()
     }
     /// See [Canvas::clear].
     pub fn clear(&mut self) {

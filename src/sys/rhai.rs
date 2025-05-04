@@ -11,12 +11,12 @@ pub struct Rhai {
     scripts: Components<AST>,
 }
 
-impl Rhai {
-    pub fn load(&mut self, script: &UID, entity: &UID, files: Assets) {
-        self.
-    }
+// impl Rhai {
+//     pub fn load(&mut self, script: &UID, entity: &UID, files: Assets) {
+//         self.
+//     }
 
-    pub fn system(&mut self) {
-        self.engine.compile_file(path)
-    }
-}
+//     pub fn system(&mut self) {
+//         self.engine.compile_file(path)
+//     }
+// }

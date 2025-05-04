@@ -1,9 +1,8 @@
 use std::{
     io::{self, BufRead, Read},
-    process::{ChildStdout, Command},
+    process::Command,
 };
 
-use bimap::BiMap;
 use serde::{Deserialize, Serialize};
 
 use super::{BiComponents, UIDs};
@@ -13,7 +12,7 @@ const ASSETS: &str = "./assets";
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Assets {
     paths: BiComponents<String>,
-    commit: String,
+    hash: String,
 }
 
 impl Default for Assets {
@@ -23,7 +22,7 @@ impl Default for Assets {
             // Empty commit
             // derived from "git hash-object -t tree /dev/null"
             // Source: https://stackoverflow.com/a/25064285
-            commit: "4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string(),
+            hash: "4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string(),
         }
     }
 }
@@ -49,7 +48,7 @@ impl Assets {
         };
 
         // If there are no changes, do nothing.
-        if working == self.commit {
+        if working == self.hash {
             return Ok(());
         }
 
@@ -60,7 +59,7 @@ impl Assets {
             // Difference...
             .arg("diff")
             // from the previous polled commit...
-            .arg(&self.commit)
+            .arg(&self.hash)
             // to the latest commit (not staged)
             .arg(&working)
             // NUL delimited
@@ -104,7 +103,15 @@ impl Assets {
                 _ => {}
             }
         }
-        self.commit = working;
+
+        // Prune all previous trees except the currently referenced tree.
+        Command::new("git")
+            .arg("-C")
+            .arg(ASSETS)
+            .arg("prune")
+            .arg(&working);
+
+        self.hash = working;
 
         Ok(())
     }

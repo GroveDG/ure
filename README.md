@@ -1,9 +1,6 @@
 # Unititled Rust Engine
-
-<p align="center">
-  <img src="./logo.svg" alt="URE logo"/>
-</p>
+![URE logo](./logo.svg)
 
 ## Important Notes
-<details><summary>Do not use <code>git prune</code> on your assets folder</summary>
-URE uses git to track changes to your assets folder. To do this it uses <code>git write-tree</code> which creates <i>dangling trees</i> which capture the state of the repo like a commit. This allows URE to perform <code>git diff</code> arbitrarily to track files and keep UIDs in sync. After a change, URE <b>already runs <code>git prune</code></b> to remove previous trees, but URE <b>needs</b> to save the most recent tree for future reference.</details>
+### Do not use `git prune` on your assets folder
+> URE uses git to track changes to your assets folder. To do this it uses `git write-tree` which creates *dangling trees* which capture the state of the repo like a commit. This allows URE to perform `git diff` arbitrarily to track files and keep UIDs in sync. After a change, URE **already runs `git prune`** to remove previous trees, but URE **needs** to save the most recent tree for future reference.

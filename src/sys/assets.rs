@@ -52,6 +52,7 @@ impl Assets {
             return Ok(());
         }
 
+        // TODO: Add recovery from accidental prune
         let git = Command::new("git")
             // Run on the assets repo
             .arg("-C")

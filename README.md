@@ -1,6 +1,8 @@
 # Unititled Rust Engine
 
-
+<p align="center">
+  <img src="./logo.svg" alt="URE logo"/>
+</p>
 
 ## Important Notes
 <details><summary>Do not use <code>git prune</code> on your assets folder</summary>

@@ -74,9 +74,9 @@ impl Assets {
         let mut git_out = io::BufReader::new(git.stdout.unwrap()).split(b'\0');
 
         // For each line...
-        // NOTE: This is not for because the borrow would disallow
-        // getting other entries since all entries are seperated by
-        // NUL
+        // NOTE: This is not a for loop because the borrow would
+        // disallow getting other entries since all entries are
+        // seperated by NUL
         while let Some(status) = git_out.next() {
             let status = status?;
             let path = String::from_utf8(git_out.next().unwrap()?).unwrap();

@@ -1,5 +1,5 @@
-# Unititled Rust Engine
-![URE logo](./logo.svg)
+# ![URE logo](./logo.svg) Unititled Rust Engine 
+
 
 ## Important Notes
 #### Allow URE to manage your assets folder

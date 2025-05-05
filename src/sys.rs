@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize, de::Visitor};
 pub mod sdl;
 pub mod tf;
 pub mod tree;
-pub mod edit;
+pub mod gui;
 pub mod rhai;
 pub mod assets;
 

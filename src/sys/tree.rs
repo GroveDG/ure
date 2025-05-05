@@ -42,11 +42,16 @@ impl Tree {
     pub fn children(&self, uid: &UID) -> Result<std::slice::Iter<'_, UID>, ()> {
         self.get(uid).map(|node| node.children.iter())
     }
-    pub fn dfs(&self, root: UID) -> DFS<'_>
+    /// Depth-fist post order
+    /// 
+    /// This is UI layout order, 2D render order, and script execution order.
+    /// 
+    /// https://en.wikipedia.org/wiki/Tree_traversal#Post-order,_LRN
+    pub fn lrn(&self, root: UID) -> LRN<'_>
     where
         Self: Sized,
     {
-        DFS::new(self, root)
+        LRN::new(self, root)
     }
     pub fn ancestors(&self, node: UID) -> Ancestors<'_> {
         Ancestors::new(self, node)
@@ -89,12 +94,12 @@ impl<'a> Ancestors<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub struct DFS<'a> {
+pub struct LRN<'a> {
     tree: &'a Tree,
     parent: UID,
     path: Vec<usize>,
 }
-impl<'a> Iterator for DFS<'a> {
+impl<'a> Iterator for LRN<'a> {
     type Item = Result<UID, ()>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -114,7 +119,7 @@ impl<'a> Iterator for DFS<'a> {
         Some(Ok(this))
     }
 }
-impl<'a> DFS<'a> {
+impl<'a> LRN<'a> {
     pub fn new(tree: &'a Tree, root: UID) -> Self {
         let mut dfs = Self {
             tree,

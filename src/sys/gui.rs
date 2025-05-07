@@ -79,8 +79,10 @@ pub struct Layout {
     elements: Components<Lay>
 }
 
-// impl Layout {
-//     pub fn run(&mut self, tree: &Tree) {
-//         tree.lrn(tree.)
-//     }
-// }
+impl Layout {
+    pub fn run(&mut self, tree: &Tree) {
+        for lay in tree.dfs().filter_map(|uid| self.elements.get(uid)) {
+            lay
+        }
+    }
+}

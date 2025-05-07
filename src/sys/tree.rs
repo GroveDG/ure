@@ -60,6 +60,9 @@ impl Tree {
         })).into();
 
         self.map.insert(uid, node);
+        if parent.is_none() {
+            self.roots.push(node);
+        }
 
         unsafe {
             if let Some(parent) = parent {
@@ -82,9 +85,13 @@ impl Tree {
         unsafe {
             if let Some(parent) = node.parent.take() {
                 (*parent.as_ptr()).children.retain(|n| *n != node_ptr);
+            } else {
+                // Remove from roots if present
+                self.roots.retain(|root| *root != node_ptr);
             }
             for child in node.children.drain(..) {
                 (*child.as_ptr()).parent = None;
+                self.roots.push(child);
             }
             let next = node.next.take();
             let prev = node.prev.take();
@@ -96,5 +103,28 @@ impl Tree {
             }
         }
         drop(node);
+    }
+    pub fn dfs<'a>(&'a self) -> DFSPostOrder<'a> {
+        DFSPostOrder { tree: self, node: self.first }
+    }
+    pub fn dfs_children<'a>(&'a self) -> DFSPostOrder<'a> {
+        DFSPostOrder { tree: self, node: self.first }
+    }
+}
+
+pub struct DFSPostOrder<'a> {
+    tree: &'a Tree,
+    node: Option<NonNull<Node>>,
+}
+
+impl<'a> Iterator for DFSPostOrder<'a> {
+    type Item = &'a UID;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        return self.node.map(|n| unsafe {
+            let n = n.as_ref();
+            self.node = n.next;
+            &n.uid
+        })
     }
 }

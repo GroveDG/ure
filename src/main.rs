@@ -62,6 +62,8 @@ fn main() {
     space.lock().unwrap().insert(root, Matrix2D::identity());
     windows.lock().unwrap().insert(root, "Window", 640, 480);
 
+    println!("{:?}", tree);
+
     // Store the start time of the previous frame
     let mut last_start = Instant::now();
     'game: loop {

@@ -1,4 +1,6 @@
 use std::{
+    fs::File,
+    io::BufWriter,
     sync::{Arc, Mutex},
     thread::sleep,
     time::{Duration, Instant},
@@ -6,7 +8,9 @@ use std::{
 
 use call::Call;
 use cgmath::SquareMatrix;
+use ron::ser::{PrettyConfig, to_string_pretty};
 use sdl2::event::Event;
+use serde::Serialize;
 use sys::{
     UID, UIDs,
     sdl::{Events, Windows},
@@ -58,11 +62,31 @@ fn main() {
     };
 
     // Init root
-    tree.lock().unwrap().insert(root, None).unwrap();
+    tree.lock().unwrap().insert(root, None);
+    tree.lock()
+        .unwrap()
+        .insert(uids.lock().unwrap().add(), Some(root));
+    tree.lock()
+        .unwrap()
+        .insert(uids.lock().unwrap().add(), Some(root));
+    tree.lock()
+        .unwrap()
+        .insert(uids.lock().unwrap().add(), None);
     space.lock().unwrap().insert(root, Matrix2D::identity());
     windows.lock().unwrap().insert(root, "Window", 640, 480);
 
-    println!("{:?}", tree);
+    {
+        let file = File::options()
+            .create(true)
+            .write(true)
+            .open("tree.ure")
+            .unwrap();
+        ron::Options::default().to_io_writer_pretty(
+            file,
+            tree.as_ref(),
+            PrettyConfig::default().indentor("\t").struct_names(true),
+        ).unwrap();
+    }
 
     // Store the start time of the previous frame
     let mut last_start = Instant::now();
@@ -79,7 +103,7 @@ fn main() {
             }
         }
 
-        // 
+        //
 
         // Windowing system
         {

@@ -1,130 +1,201 @@
-use std::{collections::HashMap, marker::PhantomData, ptr::NonNull};
+use serde::{
+    ser::{SerializeSeq, SerializeStruct, SerializeTuple, SerializeTupleStruct}, Deserialize, Serialize
+};
 
 use super::{Components, UID};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Deserialize)]
 pub struct Tree {
-    map: HashMap<UID, NonNull<Node>>,
-    roots: Vec<NonNull<Node>>,
-    first: Option<NonNull<Node>>,
-    _data: PhantomData<Box<Node>>,
-}
-impl Drop for Tree {
-    fn drop(&mut self) {
-        // See [LinkedList::pop_front_node]
-        while let Some(first) = self.first {
-            unsafe {
-                let mut first: Box<Node> = Box::from_raw(first.as_ptr());
-                self.first = first.next.take();
-                if let Some(first) = self.first {
-                    (*first.as_ptr()).prev = None;
-                }
-                drop(first);
-            }
-        }
-    }
+    map: Components<Node>,
+    roots: Vec<UID>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Node {
-    uid: UID,
-    parent: Option<NonNull<Node>>,
-    children: Vec<NonNull<Node>>,
-    next: Option<NonNull<Node>>,
-    prev: Option<NonNull<Node>>,
+    parent: Option<UID>,
+    children: Vec<UID>,
 }
-/*
-6
--3
- -1
- -2
--5
- -4
-*/
+
 impl Tree {
-    pub fn insert(&mut self, uid: UID, parent: Option<&UID>) -> Result<(), ()> {
-        let parent = parent.and_then(|p| self.map.get(p).copied());
-
-        let prev = if let Some(parent) = parent {
-            unsafe { (*parent.as_ptr()).prev }
-        } else {
-            self.roots.last().copied()
-        };
-
-        let node = Box::leak(Box::new(Node {
+    pub fn insert(&mut self, uid: UID, parent: Option<UID>) {
+        self.add_child(uid, parent.as_ref());
+        self.map.insert(
             uid,
-            parent,
-            children: Vec::new(),
-            next: parent,
-            prev,
-        })).into();
-
-        self.map.insert(uid, node);
-        if parent.is_none() {
-            self.roots.push(node);
-        }
-
-        unsafe {
-            if let Some(parent) = parent {
-                (*parent.as_ptr()).children.push(node);
-                (*parent.as_ptr()).prev = Some(node);
-            }
-            if let Some(prev) = prev {
-                (*prev.as_ptr()).next = Some(node);
-            }
-        }
-
-        Ok(())
+            Node {
+                parent,
+                children: Vec::new(),
+            },
+        );
     }
 
-    pub fn delete(&mut self, node: &UID) {
-        let Some(node_ptr) = self.map.remove(&node) else {
+    fn add_child(&mut self, uid: UID, parent: Option<&UID>) {
+        if let Some(parent) = parent {
+            self.get_mut(parent).unwrap().children.push(uid);
+        } else {
+            self.roots.push(uid);
+        }
+    }
+
+    pub fn get(&self, uid: &UID) -> Option<&Node> {
+        self.map.get(uid)
+    }
+
+    fn get_mut(&mut self, uid: &UID) -> Option<&mut Node> {
+        self.map.get_mut(uid)
+    }
+
+    pub fn children(&self, parent: Option<&UID>) -> Option<&Vec<UID>> {
+        if let Some(parent) = parent {
+            self.map.get(parent).map(|node| &node.children)
+        } else {
+            Some(&self.roots)
+        }
+    }
+
+    pub fn delete(&mut self, uid: &UID) {
+        let Some(node) = self.map.remove(uid) else {
             return;
         };
-        let mut node: Box<Node> = unsafe { Box::from_raw(node_ptr.as_ptr()) };
-        unsafe {
-            if let Some(parent) = node.parent.take() {
-                (*parent.as_ptr()).children.retain(|n| *n != node_ptr);
-            } else {
-                // Remove from roots if present
-                self.roots.retain(|root| *root != node_ptr);
-            }
-            for child in node.children.drain(..) {
-                (*child.as_ptr()).parent = None;
-                self.roots.push(child);
-            }
-            let next = node.next.take();
-            let prev = node.prev.take();
-            if let Some(next) = next {
-                (*next.as_ptr()).prev = prev;
-            }
-            if let Some(prev) = prev {
-                (*prev.as_ptr()).next = next;
-            }
+        if let Some(parent) = node.parent {
+            self.map
+                .get_mut(&parent)
+                .unwrap()
+                .children
+                .retain(|child| child != uid);
+        } else {
+            self.roots.retain(|root| root != uid);
         }
-        drop(node);
     }
-    pub fn dfs<'a>(&'a self) -> DFSPostOrder<'a> {
-        DFSPostOrder { tree: self, node: self.first }
+
+    pub fn child(&self, parent: Option<&UID>, i: usize) -> Option<&UID> {
+        if let Some(parent) = parent {
+            &self.get(parent).unwrap().children
+        } else {
+            &self.roots
+        }
+        .get(i)
     }
-    pub fn dfs_children<'a>(&'a self) -> DFSPostOrder<'a> {
-        DFSPostOrder { tree: self, node: self.first }
+
+    pub fn dfs_post(&self) -> DFSPost {
+        DFSPost::new(self)
+    }
+
+    pub fn dfs_pre(&self) -> DFSPre {
+        DFSPre::new(self)
     }
 }
 
-pub struct DFSPostOrder<'a> {
+pub struct DFSPost<'a> {
     tree: &'a Tree,
-    node: Option<NonNull<Node>>,
+    stack: Vec<(Option<UID>, usize)>,
 }
+impl<'a> DFSPost<'a> {
+    fn new(tree: &'a Tree) -> Self {
+        let mut dfs = Self {
+            tree,
+            stack: vec![(None, 0)],
+        };
+        dfs.descend();
+        dfs
+    }
 
-impl<'a> Iterator for DFSPostOrder<'a> {
+    fn descend(&mut self) {
+        loop {
+            let (parent, i) = self.stack.last().unwrap();
+            let Some(child) = self.tree.child(parent.as_ref(), *i).copied() else {
+                break;
+            };
+            self.stack.push((Some(child), 0));
+        }
+    }
+}
+impl<'a> Iterator for DFSPost<'a> {
     type Item = &'a UID;
 
     fn next(&mut self) -> Option<Self::Item> {
-        return self.node.map(|n| unsafe {
-            let n = n.as_ref();
-            self.node = n.next;
-            &n.uid
+        Some(loop {
+            let Some((parent, i)) = self.stack.last_mut() else {
+                return None;
+            };
+            let Some(child) = self.tree.child(parent.as_ref(), *i) else {
+                self.stack.pop();
+                continue;
+            };
+            *i += 1;
+            self.descend();
+            break child;
         })
+    }
+}
+
+pub struct DFSPre<'a> {
+    tree: &'a Tree,
+    stack: Vec<(Option<UID>, usize)>,
+}
+impl<'a> DFSPre<'a> {
+    fn new(tree: &'a Tree) -> Self {
+        Self {
+            tree,
+            stack: vec![(tree.child(None, 0).copied(), 0)],
+        }
+    }
+}
+impl<'a> Iterator for DFSPre<'a> {
+    type Item = &'a UID;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(loop {
+            let Some((parent, i)) = self.stack.last_mut() else {
+                return None;
+            };
+            let Some(child) = self.tree.child(parent.as_ref(), *i) else {
+                self.stack.pop();
+                continue;
+            };
+            *i += 1;
+            self.stack.push((Some(*child), 0));
+            break child;
+        })
+    }
+}
+
+impl Serialize for Tree {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        struct ChildNodes<'a> {
+            tree: &'a Tree,
+            parent: Option<&'a UID>,
+        }
+        impl<'a> Serialize for ChildNodes<'a> {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                let children = self.tree.children(self.parent).unwrap();
+                let mut serializer = serializer.serialize_seq(Some(children.len()))?;
+                for child in children {
+                    if self.tree.children(Some(child)).unwrap().is_empty() {
+                        serializer.serialize_element(child)?;
+                    } else {
+                        serializer.serialize_element(&(
+                            child,
+                            Self {
+                                tree: self.tree,
+                                parent: Some(child),
+                            },
+                        ))?;
+                    }
+                }
+                serializer.end()
+            }
+        }
+        let mut serializer = serializer.serialize_tuple_struct("Tree", 1)?;
+        serializer.serialize_field(&ChildNodes {
+            tree: self,
+            parent: None,
+        })?;
+        serializer.end()
     }
 }

@@ -3,13 +3,13 @@ use std::{
     process::Command,
 };
 
-use serde::{Deserialize, Serialize};
+// use serde::{Deserialize, Serialize};
 
 use super::{BiComponents, UIDs};
 
 const ASSETS: &str = "./assets";
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct Assets {
     paths: BiComponents<String>,
     hash: String,

@@ -1,11 +1,11 @@
 use std::{
-    collections::{HashMap, HashSet},
-    u64,
+    collections::{HashMap, HashSet}, fmt::{Debug, Display}, u64
 };
 
-use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD as B64};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD as B64};
 use bimap::BiHashMap;
 use rand::{RngCore, rngs::ThreadRng};
+
 use serde::{Deserialize, Serialize, de::Visitor};
 
 pub mod sdl;
@@ -18,16 +18,26 @@ pub mod assets;
 pub type Components<C> = HashMap<UID, C>;
 pub type BiComponents<C> = BiHashMap<UID, C>;
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub struct UID(u64);
+impl Debug for UID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", B64.encode(self.0.to_be_bytes()))
+    }
+}
+impl Display for UID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 impl Serialize for UID {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
         if serializer.is_human_readable() {
-            let b64 = B64.encode(self.0.to_be_bytes());
-            serializer.serialize_str(&b64)
+            serializer.serialize_str(&format!("{}", self))
         } else {
             serializer.serialize_u64(self.0)
         }

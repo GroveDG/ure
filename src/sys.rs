@@ -8,12 +8,12 @@ use rand::{RngCore, rngs::ThreadRng};
 
 use serde::{Deserialize, Serialize, de::Visitor};
 
-pub mod sdl;
 pub mod tf;
 pub mod tree;
-pub mod gui;
-pub mod rhai;
+// pub mod gui;
+pub mod input;
 pub mod assets;
+pub mod window;
 
 pub type Components<C> = HashMap<UID, C>;
 pub type BiComponents<C> = BiHashMap<UID, C>;

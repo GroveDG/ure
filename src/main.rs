@@ -1,78 +1,81 @@
 use std::{
     fs::File,
-    thread::sleep,
+    thread,
     time::{Duration, Instant},
 };
 
+use app::{App, UserEvent};
 use cgmath::SquareMatrix;
 use ron::ser::PrettyConfig;
-use sdl2::{event::Event, pixels::Color};
 use sys::{
-    gui::{
-        layout::{Lay, Layout},
-        render::{BoxRenderer, Style},
-    }, sdl::{Events, Windows}, tf::{Matrix2D, Space2D}, tree::Tree, UIDs
+    UIDs,
+    tf::{Matrix2D, Space2D},
+    tree::Tree,
+    window::Windows,
+};
+use winit::{
+    event_loop::{EventLoop, EventLoopProxy},
+    window::{Window, WindowAttributes},
 };
 
+mod app;
 mod call;
 mod sys;
 
-const FRAME_PERIOD: Duration = Duration::new(0, 0_016_666_667);
+/*
+    Code is flagged by importance to inform
+    you about deleting or modifying it.
+
+    [CORE] What makes URE, URE.
+    [VITAL] Essential to most games.
+    [USEFUL] Commonly used, but may vary.
+    [EXAMPLE] For instructional purposes only.
+
+    Other flags include...
+    [TEST] Test features (remove for release).
+    [TODO] Mark where work is needed.
+*/
 
 fn main() {
-    // Initialize UID system
+    // [VITAL] Initialize App
+    let event_loop = EventLoop::with_user_event().build().unwrap();
+
+    // [VITAL] Initialize App Systems
+    let (window_sender, windows) = Windows::new();
+
+    let game_thread = {
+        let event_proxy = event_loop.create_proxy();
+        thread::spawn(|| game(event_proxy, windows))
+    };
+    event_loop
+        .run_app(&mut App {
+            game: game_thread,
+            windows: window_sender,
+        })
+        .unwrap();
+}
+
+// [VITAL] Frame Period (Inverse of FPS)
+const FRAME_PERIOD: Duration = Duration::new(0, 0_016_666_667);
+
+fn game(event_proxy: EventLoopProxy<UserEvent>, mut windows: Windows) {
+    // [CORE] Initialize UID System
     let mut uids = UIDs::new().unwrap();
 
-    // Initialize SDL systems
-    let mut sdl = sdl2::init().unwrap();
-    let mut windows = Windows::new(&sdl).unwrap();
-    let mut events = Events::new(&sdl).unwrap();
-
-    // Initialize game systems
+    // [USEFUL] Initialize Game Systems
     let mut tree = Tree::default();
     let mut space = Space2D::default();
-    let mut layout = Layout::default();
-    let mut box_renderer = BoxRenderer::default();
 
-    // // Initialize mass calls
-    // // If you call these functions while one of them is locked,
-    // // the application will become deadlocked and freeze.
-    // let mut delete = {
-    //     let uids = Arc::clone(&uids);
-    //     let tree = Arc::clone(&tree);
-    //     let space = Arc::clone(&space);
-    //     let windows = Arc::clone(&windows);
-    //     Call::new(Box::new(move |batch: &mut Vec<UID>| {
-    //         // Lock before call for performance.
-    //         let mut uids = uids;
-    //         let mut tree = tree;
-    //         let mut space = space;
-    //         let mut windows = windows;
-    //         // Call
-    //         for args in batch.drain(..) {
-    //             uids.delete(&args);
-    //             tree.delete(&args); // Let tree add children to batch
-    //             space.delete(&args);
-    //             windows.delete(&args);
-    //         }
-    //     }))
-    // };
-
-    // Init root
+    // [EXAMPLE] Init Root
     let root = uids.add();
     tree.insert(root, None);
     tree.insert(uids.add(), Some(root));
     tree.insert(uids.add(), Some(root));
     tree.insert(uids.add(), None);
     space.insert(root, Matrix2D::identity());
-    windows.insert(root, "Window", 640, 480);
-    layout.insert(root, Lay::default().fix_size(240, 240), None);
-    box_renderer.insert(root, Style {
-        color: Color::WHITE,
-        radius: None,
-        border: None,
-    });
+    windows.await_new(root, WindowAttributes::default(), &event_proxy);
 
+    // [TEST] Write Tree
     {
         let file = File::options()
             .create(true)
@@ -88,51 +91,39 @@ fn main() {
             .unwrap();
     }
 
+    // [VITAL] Game Loop
     let mut last_start = Instant::now(); // Last frame start
     'game: loop {
-        // Time Frame
+        // [VITAL] Time Frame
         let start = Instant::now();
         let delta = start - last_start;
 
-        // Poll Events
-        for event in events.poll() {
-            match event {
-                Event::Quit { .. } => break 'game,
-                _ => {}
-            }
-        }
+        // [USEFUL] GUI Layout & Rendering
+        // {
+        //     layout.run();
+        //     if let Some(window) = windows.get_mut(&root) {
+        //         for node in layout.render_order() {
+        //             box_renderer.render(node, window, &layout);
+        //         }
+        //     }
+        // }
 
-        // Clear Windows (& Quit)
+        // [VITAL] Receive New Windows, Quit if Empty
         {
-            // If no windows, quit.
+            windows.poll();
             if windows.is_empty() {
                 break 'game;
             }
-            // Clear frame
-            windows.clear();
         }
 
-        // GUI Layout & Rendering
-        {
-            layout.run();
-            if let Some(window) = windows.get_mut(&root) {
-                for node in layout.render_order() {
-                    box_renderer.render(node, window, &layout);
-                }
-            }
-        }
-
-        // Render and Present Frame
-        windows.present();
-
-        // Time Frame
+        // [VITAL] Time Frame
         let end = Instant::now();
         let cpu_time = end - start;
-        println!("{:?}, {:?}", cpu_time, delta);
+        println!("{:?}", cpu_time);
 
-        // Delay Update
+        // [VITAL] Delay Update
         let remaining = FRAME_PERIOD.saturating_sub(cpu_time);
-        sleep(remaining); // Sleep slightly overshoots frame period
+        thread::sleep(remaining); // Sleep slightly overshoots frame period
 
         last_start = start;
     }

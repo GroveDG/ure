@@ -1,4 +1,4 @@
-use sdl2::{Sdl, VideoSubsystem, render::Canvas, video::Window};
+use sdl2::{pixels::Color, render::Canvas, video::Window, Sdl, VideoSubsystem};
 
 use crate::sys::{Components, UID};
 
@@ -13,6 +13,12 @@ impl Windows {
             video: sdl.video()?,
             canvases: Default::default(),
         })
+    }
+    pub fn get<'a>(&'a self, uid: &UID) -> Option<&'a Canvas<Window>> {
+        self.canvases.get(uid)
+    }
+    pub fn get_mut<'a>(&'a mut self, uid: &UID) -> Option<&'a mut Canvas<Window>> {
+        self.canvases.get_mut(uid)
     }
     /// Create a new window on the entity.
     pub fn insert(&mut self, uid: UID, title: &str, width: u32, height: u32) -> UID {
@@ -40,6 +46,7 @@ impl Windows {
     /// See [Canvas::clear].
     pub fn clear(&mut self) {
         for canvas in self.canvases.values_mut() {
+            canvas.set_draw_color(Color::BLACK);
             canvas.clear();
         }
     }

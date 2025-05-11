@@ -1,5 +1,6 @@
 use serde::{
-    ser::{SerializeSeq, SerializeStruct, SerializeTuple, SerializeTupleStruct}, Deserialize, Serialize
+    Deserialize, Serialize,
+    ser::{SerializeSeq, SerializeTupleStruct},
 };
 
 use super::{Components, UID};
@@ -28,6 +29,7 @@ impl Tree {
         );
     }
 
+    /// Returns an Err if parent does not exist.
     fn add_child(&mut self, uid: UID, parent: Option<&UID>) {
         if let Some(parent) = parent {
             self.get_mut(parent).unwrap().children.push(uid);

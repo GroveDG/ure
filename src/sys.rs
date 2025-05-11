@@ -87,11 +87,11 @@ pub struct UIDs {
     rng: ThreadRng,
 }
 impl UIDs {
-    pub fn new() -> Result<Self, rand::distr::uniform::Error> {
-        Ok(Self {
+    pub fn new() -> Self {
+        Self {
             entities: Default::default(),
             rng: rand::rng(),
-        })
+        }
     }
 
     pub fn add(&mut self) -> UID {

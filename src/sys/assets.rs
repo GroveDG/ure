@@ -8,6 +8,7 @@ use std::{
 use super::{BiComponents, UIDs};
 
 const ASSETS: &str = "./assets";
+const GIT_NULL: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 #[derive(Debug)]
 pub struct Assets {
@@ -22,7 +23,7 @@ impl Default for Assets {
             // Empty commit
             // derived from "git hash-object -t tree /dev/null"
             // Source: https://stackoverflow.com/a/25064285
-            hash: "4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string(),
+            hash: GIT_NULL.to_string(),
         }
     }
 }
@@ -34,26 +35,35 @@ impl Assets {
     pub fn poll(&mut self, uids: &mut UIDs) -> io::Result<()> {
         // Create a tree object from the working tree
         // This allows us to git diff without committing
-        let working = {
+        let working = if let Some(mut stdout) = Command::new("git")
+            .arg("-C")
+            .arg(ASSETS)
+            .arg("write-tree")
+            .spawn()?
+            .stdout
+            .take()
+        {
             let mut working = String::new();
-            Command::new("git")
-                .arg("-C")
-                .arg(ASSETS)
-                .arg("write-tree")
-                .spawn()?
-                .stdout
-                .unwrap()
-                .read_to_string(&mut working)?;
+            stdout.read_to_string(&mut working)?;
             working
+        } else {
+            return io::Result::Err(io::Error::new(io::ErrorKind::Other, "Buffer missing"));
         };
 
+        // If the output does not look like a hash, return Err.
+        if working.len() != GIT_NULL.len() {
+            return io::Result::Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Git returned invalid data:\n{}", working),
+            ));
+        }
         // If there are no changes, do nothing.
         if working == self.hash {
             return Ok(());
         }
 
         // TODO: Add recovery from accidental prune
-        let git = Command::new("git")
+        let mut git_out = if let Some(stdout) = Command::new("git")
             // Run on the assets repo
             .arg("-C")
             .arg(ASSETS)
@@ -68,10 +78,18 @@ impl Assets {
             // 2 char status and file name
             // I think the 2nd char is unused here
             .arg("--name-status")
-            .spawn()?;
-
-        // Seperate by NUL
-        let mut git_out = io::BufReader::new(git.stdout.unwrap()).split(b'\0');
+            .spawn()?
+            .stdout
+            .take()
+        {
+            // Seperate by NUL
+            io::BufReader::new(stdout).split(b'\0')
+        } else {
+            return io::Result::Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Git returned invalid data:\n{}", working),
+            ));
+        };
 
         // For each line...
         // NOTE: This is not a for loop because the borrow would

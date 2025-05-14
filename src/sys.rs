@@ -10,10 +10,12 @@ use serde::{Deserialize, Serialize, de::Visitor};
 
 pub mod tf;
 pub mod tree;
-// pub mod gui;
+#[cfg(feature = "GUI")]
+pub mod gui;
 pub mod input;
 pub mod assets;
 pub mod window;
+pub mod gpu;
 
 pub type Components<C> = HashMap<UID, C>;
 pub type BiComponents<C> = BiHashMap<UID, C>;

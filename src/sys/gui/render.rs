@@ -1,27 +1,27 @@
-use sdl2::{pixels::Color, render::Canvas, video::Window};
+use wgpu::Color;
 
 use crate::sys::{Components, UID};
 
-use super::layout::Layout;
+use super::{layout::Layout, Pixels};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Border {
-    width: u32,
+    width: Pixels,
     color: Color,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct Style {
     pub color: Color,
-    pub radius: Option<u32>,
+    pub radius: Option<Pixels>,
     pub border: Option<Border>,
 }
 #[derive(Debug, Default)]
-pub struct BoxRenderer {
+pub struct QuadRenderer {
     boxes: Components<Style>,
 }
 
-impl BoxRenderer {
+impl QuadRenderer {
     pub fn render(&self, uid: &UID, target: &mut Canvas<Window>, layout: &Layout) {
         let Some(rect) = layout.get_rect(uid).copied() else {
             return;

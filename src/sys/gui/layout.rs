@@ -2,19 +2,18 @@
 //!
 //!
 
-use sdl2::rect::Rect;
+use cgmath::Vector2;
 
 use crate::sys::{
     Components, UID,
     tree::{DFSPost, Tree},
 };
 
-type Pixel = u32;
-type Precision = f32;
+use super::{Pixels, Precision, Rect};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Size {
-    Fixed(Pixel),
+    Fixed(Pixels),
     Ratio(Precision),
 }
 
@@ -43,10 +42,10 @@ pub struct BoxSize {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Pad {
-    pub up: Pixel,
-    pub down: Pixel,
-    pub left: Pixel,
-    pub right: Pixel,
+    pub up: Pixels,
+    pub down: Pixels,
+    pub left: Pixels,
+    pub right: Pixels,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -68,7 +67,7 @@ pub enum Direction {
 pub struct Lay {
     pub size: BoxSize,
     pub pad: Pad,
-    pub gap: Pixel,
+    pub gap: Pixels,
     pub align: Align,
     pub direction: Direction,
 }
@@ -95,15 +94,15 @@ impl Default for Lay {
     }
 }
 impl Lay {
-    pub fn fix_w(mut self, w: u32) -> Self {
+    pub fn fix_w(mut self, w: Pixels) -> Self {
         self.size.w.sizing = Sizing::Size(Size::Fixed(w));
         self
     }
-    pub fn fix_h(mut self, h: u32) -> Self {
+    pub fn fix_h(mut self, h: Pixels) -> Self {
         self.size.h.sizing = Sizing::Size(Size::Fixed(h));
         self
     }
-    pub fn fix_size(mut self, w: u32, h: u32) -> Self {
+    pub fn fix_size(mut self, w: Pixels, h: Pixels) -> Self {
         self.size.w.sizing = Sizing::Size(Size::Fixed(w));
         self.size.h.sizing = Sizing::Size(Size::Fixed(h));
         self
@@ -140,13 +139,13 @@ impl Layout {
                 Direction::Down => (1, 0),
             };
             let mut fit = [false, false];
-            let mut out_size = [0, 0];
+            let mut out_size: Vector2<Pixels> = Vector2 { x: 0, y: 0 };
 
             match p_lay.size.w.sizing {
                 Sizing::Fit => fit[0] = true,
                 Sizing::Fill => todo!(),
                 Sizing::Size(size) => match size {
-                    Size::Fixed(x) => out_size[0] = x,
+                    Size::Fixed(x) => out_size.x = x,
                     _ => {}
                 },
             }
@@ -154,26 +153,23 @@ impl Layout {
                 Sizing::Fit => fit[1] = true,
                 Sizing::Fill => todo!(),
                 Sizing::Size(size) => match size {
-                    Size::Fixed(y) => out_size[1] = y,
+                    Size::Fixed(y) => out_size.y = y,
                     _ => {}
                 },
             }
 
             if fit[0] || fit[1] {
                 let out_size = &mut out_size;
-                fn size(child: &Rect) -> [u32; 2] {
-                    [child.width(), child.height()]
-                }
                 let mut sizing_fn: Box<dyn FnMut(&Rect)> = match (fit[along_i], fit[across_i]) {
                     (true, true) => Box::new(|child: &Rect| {
-                        out_size[along_i] += size(child)[along_i];
-                        out_size[across_i] += size(child)[across_i];
+                        out_size[along_i] += child.size[along_i];
+                        out_size[across_i] += child.size[across_i];
                     }),
                     (true, false) => {
-                        Box::new(|child: &Rect| out_size[along_i] += size(child)[along_i])
+                        Box::new(|child: &Rect| out_size[along_i] += child.size[along_i])
                     }
                     (false, true) => {
-                        Box::new(|child: &Rect| out_size[across_i] += size(child)[across_i])
+                        Box::new(|child: &Rect| out_size[across_i] += child.size[across_i])
                     }
                     (false, false) => unreachable!(),
                 };
@@ -184,8 +180,10 @@ impl Layout {
 
             let p_out = self.out.get_mut(parent).unwrap();
 
-            p_out.set_width(out_size[0] + p_lay.pad.left + p_lay.pad.right);
-            p_out.set_height(out_size[1] + p_lay.pad.up + p_lay.pad.down);
+            out_size.x += p_lay.pad.left + p_lay.pad.right;
+            out_size.y += p_lay.pad.up + p_lay.pad.down;
+
+            p_out.size = out_size;
         }
     }
 
@@ -199,7 +197,7 @@ impl Layout {
 
     pub fn insert(&mut self, uid: UID, lay: Lay, parent: Option<UID>) {
         self.lay.insert(uid, lay);
-        self.out.insert(uid, Rect::new(0, 0, 1, 1));
+        self.out.insert(uid, Default::default());
         self.tree.insert(uid, parent);
     }
 }

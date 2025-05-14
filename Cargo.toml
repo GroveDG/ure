@@ -7,14 +7,16 @@ edition = "2024"
 base64 = "0.22.1"
 bimap = "0.6.3"
 cgmath = "0.18.0"
+futures = "0.3.31"
 rand = "0.9.1"
 raw-window-handle = "0.6.2"
 ron = "0.10.1"
 serde = { version = "1.0.219", features = ["derive"] }
-softbuffer = { version = "0.4.6", default-features = false, features = ["x11", "x11-dlopen"] }
-winit = { version = "0.30.10", default-features = false, features = ["x11"] }
+wgpu = { version = "25.0.0" }
+winit = { version = "0.30.10", default-features = false, features = ["rwh_06", "x11"] }
 
 [features]
-default = ["2D"]
+default = ["2D", "GUI"]
 2D = []
 3D = []
+GUI = []

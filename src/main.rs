@@ -11,14 +11,13 @@ use app::{App, UserEvent};
 use cgmath::SquareMatrix;
 use sys::{
     UID, UIDs,
-    gpu::{GPU, RenderCommand, surfaces::Surfaces},
-    gui::layout::Layout,
+    gpu::GPU,
+    gui::Layout,
     input::Input,
     tf::{Matrix2D, Space2D},
     tree::Tree,
     window::Windows,
 };
-use wgpu::RenderPassDescriptor;
 use winit::{
     error::EventLoopError,
     event_loop::{EventLoop, EventLoopProxy},
@@ -27,6 +26,7 @@ use winit::{
 
 mod app;
 mod sys;
+mod bank;
 
 /// **CORE** Code in URE is flagged to give information
 /// to the developer.
@@ -173,7 +173,8 @@ fn game(
         // END OF FRAME
         // ========================================================
 
-        for (uid, window) in windows.iter() {
+        // [VITAL] Request Redraws
+        for (_, window) in windows.iter() {
             window.request_redraw();
         }
 

@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use wgpu::{Device, Surface, SurfaceCapabilities, SurfaceConfiguration};
-use winit::{dpi::PhysicalSize, window::Window};
+use winit::window::Window;
 
-use crate::sys::{Components, UID, window::Windows};
+use crate::sys::{Components, UID};
 
 use super::GPU;
 
@@ -14,33 +14,36 @@ pub struct Surfaces<'a> {
 
 #[derive(Debug)]
 pub struct WindowSurface<'a> {
+    pub window: Arc<Window>,
     pub surface: Surface<'a>,
     pub capabilities: SurfaceCapabilities,
 }
 
 impl<'a> Surfaces<'a> {
     pub fn insert(&mut self, uid: UID, window: Arc<Window>, gpu: &GPU) {
-        let surface = gpu.instance.create_surface(window).unwrap();
+        let surface = gpu.instance.create_surface(Arc::clone(&window)).unwrap();
         let capabilities = surface.get_capabilities(&gpu.adapter);
         self.surfaces.insert(
             uid,
             WindowSurface {
+                window,
                 surface,
                 capabilities,
             },
         );
     }
-    pub fn configure(&self, uid: &UID, device: &Device, size: (u32, u32)) {
+    pub fn configure(&self, uid: &UID, device: &Device) {
         let Some(surface) = self.get(uid) else {
             return;
         };
+        let size = surface.window.inner_size();
         let config = SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface.capabilities.formats[0],
             view_formats: vec![surface.capabilities.formats[0].add_srgb_suffix()],
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
-            width: size.0,
-            height: size.1,
+            width: size.width,
+            height: size.height,
             desired_maximum_frame_latency: 2,
             present_mode: wgpu::PresentMode::AutoVsync,
         };

@@ -28,8 +28,8 @@ pub enum UserEvent {
 pub struct App<'a> {
     pub windows: Sender<(UID, Arc<Window>)>,
     pub window_ids: BiComponents<WindowId>,
-    pub input: Arc<Mutex<Input>>,
     pub surfaces: Surfaces<'a>,
+    pub input: Arc<Mutex<Input>>,
     pub gpu: GPU,
 }
 
@@ -96,7 +96,7 @@ impl<'a> ApplicationHandler<UserEvent> for App<'a> {
             }
             WindowEvent::Resized(size) => {
                 let uid = self.window_ids.get_by_right(&window_id).unwrap();
-                self.surfaces.configure(uid, &self.gpu.device, size.into());
+                self.surfaces.configure(uid, &self.gpu.device);
             }
             WindowEvent::RedrawRequested => {
                 let start = Instant::now();
@@ -121,6 +121,7 @@ impl<'a> ApplicationHandler<UserEvent> for App<'a> {
                 }
                 self.window_ids.insert(uid, window.id());
                 self.surfaces.insert(uid, window, &self.gpu);
+                self.surfaces.configure(&uid, &self.gpu.device);
             }
         }
     }

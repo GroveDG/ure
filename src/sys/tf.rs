@@ -1,20 +1,20 @@
 use super::{Components, UID};
 use cgmath::SquareMatrix;
 
-type P = f32;
+pub type Precision = f32;
 
 #[derive(Debug, Clone)]
-pub struct Space<M: SquareMatrix<Scalar = P>> {
+pub struct Space<M: SquareMatrix<Scalar = Precision>> {
     transforms: Components<M>,
 }
-impl<M: SquareMatrix<Scalar = P>> Default for Space<M> {
+impl<M: SquareMatrix<Scalar = Precision>> Default for Space<M> {
     fn default() -> Self {
         Self {
             transforms: Default::default(),
         }
     }
 }
-impl<M: SquareMatrix<Scalar = P>> Space<M> {
+impl<M: SquareMatrix<Scalar = Precision>> Space<M> {
     pub fn insert(&mut self, uid: UID, matrix: M) {
         self.transforms.insert(uid, matrix);
     }

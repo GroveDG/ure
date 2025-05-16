@@ -4,6 +4,7 @@ use std::{
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD as B64};
 use bimap::BiHashMap;
+use delete::Delete;
 use rand::{RngCore, rngs::ThreadRng};
 
 use serde::{Deserialize, Serialize, de::Visitor};
@@ -86,13 +87,13 @@ impl<'de> Deserialize<'de> for UID {
 
 #[derive(Debug, Clone)]
 pub struct UIDs {
-    entities: HashSet<UID>,
+    ids: HashSet<UID>,
     rng: ThreadRng,
 }
 impl UIDs {
     pub fn new() -> Self {
         Self {
-            entities: Default::default(),
+            ids: Default::default(),
             rng: rand::rng(),
         }
     }
@@ -104,11 +105,13 @@ impl UIDs {
                 & 0b0000001111111111111111111111111111111111111111111111111111111111u64
                 | 0b1011100000000000000000000000000000000000000000000000000000000000u64
         });
-        while !self.entities.insert(uid) {}
+        while !self.ids.insert(uid) {}
         uid
     }
+}
 
-    pub fn delete(&mut self, uid: &UID) {
-        self.entities.remove(uid);
+impl Delete for UIDs {
+    fn delete(&mut self, uid: &UID) {
+        self.ids.remove(uid);
     }
 }

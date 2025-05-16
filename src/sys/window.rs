@@ -1,18 +1,14 @@
-use std::sync::{
-    Arc, Weak,
-    mpsc::{Receiver, Sender, channel},
-};
+use std::sync::Arc;
 
-use wgpu::{Device, Surface, SurfaceCapabilities, SurfaceConfiguration};
+use wgpu::{Surface, SurfaceCapabilities};
 use winit::{
-    dpi::PhysicalSize,
     event_loop::{EventLoopClosed, EventLoopProxy},
     window::{Window, WindowAttributes, WindowId},
 };
 
 use crate::app::UserEvent;
 
-use super::{delete::Delete, gpu::GPU, BiComponents, Components, UID};
+use super::{BiComponents, Components, UID, delete::Delete, gpu::GPU};
 
 #[derive(Debug, Default)]
 pub struct Windows<'a> {

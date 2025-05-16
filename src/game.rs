@@ -2,7 +2,7 @@ use std::{
     ops::DerefMut, sync::{Arc, Barrier, Mutex, RwLock}, time::{Duration, Instant}
 };
 
-use crate::{app::UserEvent, sys::delete::{Delete, DeleteQueue}};
+use crate::{app::UserEvent, sys::delete::DeleteQueue};
 use crate::
     sys::{
         UIDs,
@@ -108,7 +108,6 @@ pub fn game(
         let end = Instant::now();
         let cpu_time = end - start;
         println!("CPU {:?}", cpu_time);
-        println!("DELTA {:?}", delta);
 
         // [VITAL] Delay Update
         let remaining = FRAME_PERIOD.saturating_sub(cpu_time);

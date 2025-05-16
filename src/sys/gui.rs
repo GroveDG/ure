@@ -90,10 +90,6 @@ impl Layout {
         }
     }
 
-    pub fn render(&self) {
-        
-    }
-
     pub fn get_rect(&self, uid: &UID) -> Option<&Rect> {
         self.out.get(uid)
     }

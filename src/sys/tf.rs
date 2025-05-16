@@ -1,4 +1,4 @@
-use super::{Components, UID};
+use super::{delete::Delete, Components, UID};
 use cgmath::SquareMatrix;
 
 pub type Precision = f32;
@@ -18,7 +18,9 @@ impl<M: SquareMatrix<Scalar = Precision>> Space<M> {
     pub fn insert(&mut self, uid: UID, matrix: M) {
         self.transforms.insert(uid, matrix);
     }
-    pub fn delete(&mut self, uid: &UID) {
+}
+impl<M: SquareMatrix<Scalar = Precision>> Delete for Space<M> {
+    fn delete(&mut self, uid: &UID) {
         self.transforms.remove(uid);
     }
 }

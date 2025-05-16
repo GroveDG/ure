@@ -3,7 +3,7 @@ use serde::{
     ser::{SerializeSeq, SerializeTupleStruct},
 };
 
-use super::{Components, UID};
+use super::{delete::Delete, Components, UID};
 
 #[derive(Debug, Default, Deserialize)]
 pub struct Tree {
@@ -54,21 +54,6 @@ impl Tree {
         }
     }
 
-    pub fn delete(&mut self, uid: &UID) {
-        let Some(node) = self.map.remove(uid) else {
-            return;
-        };
-        if let Some(parent) = node.parent {
-            self.map
-                .get_mut(&parent)
-                .unwrap()
-                .children
-                .retain(|child| child != uid);
-        } else {
-            self.roots.retain(|root| root != uid);
-        }
-    }
-
     pub fn child(&self, parent: Option<&UID>, i: usize) -> Option<&UID> {
         if let Some(parent) = parent {
             &self.get(parent).unwrap().children
@@ -84,6 +69,23 @@ impl Tree {
 
     pub fn dfs_pre(&self) -> DFSPre {
         DFSPre::new(self)
+    }
+}
+
+impl Delete for Tree {
+    fn delete(&mut self, uid: &UID) {
+        let Some(node) = self.map.remove(uid) else {
+            return;
+        };
+        if let Some(parent) = node.parent {
+            self.map
+                .get_mut(&parent)
+                .unwrap()
+                .children
+                .retain(|child| child != uid);
+        } else {
+            self.roots.retain(|root| root != uid);
+        }
     }
 }
 

@@ -1,70 +1,83 @@
-use std::sync::{mpsc::{channel, Receiver, Sender}, Arc};
+use std::sync::{
+    Arc, Weak,
+    mpsc::{Receiver, Sender, channel},
+};
 
-use wgpu::Surface;
+use wgpu::{Device, Surface, SurfaceCapabilities, SurfaceConfiguration};
 use winit::{
+    dpi::PhysicalSize,
     event_loop::{EventLoopClosed, EventLoopProxy},
-    window::{Window, WindowAttributes},
+    window::{Window, WindowAttributes, WindowId},
 };
 
 use crate::app::UserEvent;
 
-use super::{Components, UID};
+use super::{BiComponents, Components, UID, gpu::GPU};
 
 #[derive(Debug, Default)]
-pub struct Windows {
-    windows: Components<Arc<Window>>,
+pub struct Windows<'a> {
+    windows: Components<WindowSurface<'a>>,
+    window_ids: BiComponents<WindowId>,
+    requested: u8,
 }
 
-impl Windows {
+#[derive(Debug)]
+pub struct WindowSurface<'a> {
+    pub window: Arc<Window>,
+    pub surface: Surface<'a>,
+    pub capabilities: SurfaceCapabilities,
+}
+
+impl<'a> Windows<'a> {
     /// Request a new window component to be
     /// added to the entity.
-    /// 
+    ///
     /// WHY
     /// -------------------------------------
     /// Windows are safely and soley created
     /// by [winit]. We must send an event to
     /// prompt winit to make a window. It will
-    /// send the resulting window back (see
-    /// [Windows::poll]). If you cannot
-    /// continue without the window, see
-    /// [Windows::await_new].
+    /// send the resulting window back.
     pub fn request_new(
+        &mut self,
         uid: UID,
         attr: WindowAttributes,
         event_proxy: &EventLoopProxy<UserEvent>,
     ) -> Result<(), EventLoopClosed<UserEvent>> {
+        self.requested += 1;
         event_proxy.send_event(UserEvent::NewWindow(uid, attr))
     }
-    // /// Requests a [Window] (see [Windows::request_new])
-    // /// and waits for the Window.
-    // /// 
-    // /// This is particularly useful for start-up
-    // /// when having no Windows might close the
-    // /// game.
-    // /// 
-    // /// WHY
-    // /// -------------------------------------
-    // /// See [Windows::request_new].
-    // pub fn await_new(
-    //     &mut self,
-    //     uid: UID,
-    //     attr: WindowAttributes,
-    //     event_proxy: &EventLoopProxy<UserEvent>,
-    // ) {
-    //     Self::request_new(uid, attr, event_proxy).unwrap();
-    //     let (uid, window) = self.receiver.recv().unwrap();
-    //     self.windows.insert(uid, window);
-    // }
-    pub fn insert(&mut self, uid: UID, window: Arc<Window>) {
-        self.windows.insert(uid, window);
+    pub fn insert(&mut self, uid: UID, window_id: WindowId, window: Arc<Window>, gpu: &GPU) {
+        let surface = gpu.instance.create_surface(window.clone()).unwrap();
+        let capabilities = surface.get_capabilities(&gpu.adapter);
+        self.windows.insert(
+            uid,
+            WindowSurface {
+                window,
+                surface,
+                capabilities,
+            },
+        );
+        self.window_ids.insert(uid, window_id);
+        self.requested = self.requested.saturating_sub(1);
     }
-    pub fn get(&self, uid: &UID) -> Option<&Arc<Window>> {
+    pub fn get(&self, uid: &UID) -> Option<&WindowSurface> {
         self.windows.get(uid)
     }
     pub fn is_empty(&self) -> bool {
-        self.windows.is_empty()
+        self.requested == 0 && self.windows.is_empty()
     }
-    pub fn iter(&self) -> impl Iterator<Item = (&UID, &Arc<Window>)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&UID, &WindowSurface)> {
         self.windows.iter()
+    }
+    pub fn values(&self) -> impl Iterator<Item = &WindowSurface> {
+        self.windows.values()
+    }
+    pub fn get_uid(&self, window_id: &WindowId) -> Option<&UID> {
+        self.window_ids.get_by_right(window_id)
+    }
+    pub fn remove(&mut self, uid: &UID) -> Option<WindowSurface> {
+        self.window_ids.remove_by_left(uid);
+        self.windows.remove(uid)
     }
 }

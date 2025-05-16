@@ -2,7 +2,6 @@ use wgpu::{
     wgt::DeviceDescriptor, Adapter, Color, Device, Instance, InstanceDescriptor, Queue, RequestAdapterOptions
 };
 
-pub mod surfaces;
 pub mod render2d;
 
 pub type Pixels = u16;

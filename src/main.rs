@@ -1,32 +1,17 @@
 use std::{
-    sync::{
-        Arc, Mutex,
-        mpsc::{Receiver, channel},
-    },
+    sync::{Arc, Barrier, Condvar, Mutex, RwLock},
     thread,
-    time::{Duration, Instant},
 };
 
-use app::{App, UserEvent};
-use cgmath::SquareMatrix;
-use sys::{
-    UID, UIDs,
-    gpu::GPU,
-    gui::Layout,
-    input::Input,
-    tf::{Matrix2D, Space2D},
-    tree::Tree,
-    window::Windows,
-};
-use winit::{
-    error::EventLoopError,
-    event_loop::{EventLoop, EventLoopProxy},
-    window::{Window, WindowAttributes},
-};
+use app::App;
+use render::render;
+use sys::{gpu::GPU, input::Input, window::Windows};
+use winit::{error::EventLoopError, event_loop::EventLoop};
 
 mod app;
+mod game;
+mod render;
 mod sys;
-mod bank;
 
 /// **CORE** Code in URE is flagged to give information
 /// to the developer.
@@ -55,25 +40,33 @@ fn main() {
         .build()
         .expect("EventLoop building failed. See winit::event_loop::EventLoopBuilder::build");
 
-    // [VITAL] Initialize App Systems
-    let (window_sender, window_receiver) = channel();
+    // [VITAL] Initialize Shared Systems
+    let windows = Arc::new(RwLock::new(Windows::default()));
     let input = Arc::new(Mutex::new(Input::default()));
-    let gpu = futures::executor::block_on(GPU::new());
+    let gpu = Arc::new(futures::executor::block_on(GPU::new()));
 
-    // [VITAL] Initialize Game Loop
+    // [VITAL] Initialize Render Thread
+    let frame_barrier = Arc::new(Barrier::new(2));
+    let render_thread = {
+        let gpu = gpu.clone();
+        let windows = windows.clone();
+        let frame_barrier = frame_barrier.clone();
+        thread::spawn(|| render(frame_barrier, gpu, windows))
+    };
+
+    // [VITAL] Initialize Game Thread
     let game_thread = {
         let event_proxy = event_loop.create_proxy();
         let input = Arc::clone(&input);
-        thread::spawn(|| game(event_proxy, window_receiver, input))
+        let windows = windows.clone();
+        thread::spawn(|| game::game(event_proxy, windows, input, frame_barrier))
     };
 
     // [VITAL] Run App
     let mut app = App {
-        windows: window_sender,
-        window_ids: Default::default(),
+        gpu,
+        windows,
         input,
-        surfaces: Default::default(),
-        gpu
     };
     if let Err(e) = event_loop.run_app(&mut app) {
         match e {
@@ -93,100 +86,8 @@ fn main() {
     }
 
     // [VITAL] Cleanup
-
-    // Inform game thread of close.
-    app.input.lock().unwrap().close = true;
-    // Wait for game to stop.
-    let mut i = 0;
-    while !game_thread.is_finished() && i < 10 {
-        thread::sleep(FRAME_PERIOD);
-        i += 1;
-    }
     // Prevent detatched thread.
     // (See std::thread::Thread)
     let _ = game_thread.join(); // Ignore panic.
-}
-
-// [VITAL] Frame Period (Inverse of FPS)
-const FRAME_PERIOD: Duration = Duration::new(0, 0_016_666_667);
-
-fn game(
-    event_proxy: EventLoopProxy<UserEvent>,
-    window_receiver: Receiver<(UID, Arc<Window>)>,
-    input: Arc<Mutex<Input>>,
-) {
-    // [CORE] Initialize UID System
-    let mut uids = UIDs::new();
-
-    // [USEFUL] Initialize Graphics Systems
-    let mut windows = Windows::default();
-
-    // [USEFUL] Initialize UI Systems
-    let mut layout = Layout::default();
-
-    // [USEFUL] Initialize Game Systems
-    let mut tree = Tree::default();
-    let mut space = Space2D::default();
-
-    // [EXAMPLE] Init Root
-    let root = uids.add();
-    tree.insert(root, None);
-    space.insert(root, Matrix2D::identity());
-    if Windows::request_new(root, WindowAttributes::default(), &event_proxy).is_err() {
-        return;
-    }
-
-    // [VITAL] Game Loop
-    let mut last_start = Instant::now(); // Last frame start
-    'game: loop {
-        // [VITAL] Time Frame
-        let start = Instant::now();
-        let delta = start - last_start;
-
-        // [VITAL] Acquire Input State
-        let input_state = {
-            let Ok(input) = input.lock() else {
-                break 'game;
-            };
-            input.clone()
-        };
-        // [VITAL] Close Game If Requested
-        if input_state.close {
-            break 'game;
-        }
-
-        // [VITAL] Receive New Windows
-        {
-            for (uid, window) in window_receiver.try_iter() {
-                let window = window;
-                windows.insert(uid, window);
-            }
-        }
-
-        // [USEFUL] GUI Layout
-        #[cfg(feature = "GUI")]
-        {
-            layout.run();
-        }
-
-        // ========================================================
-        // END OF FRAME
-        // ========================================================
-
-        // [VITAL] Request Redraws
-        for (_, window) in windows.iter() {
-            window.request_redraw();
-        }
-
-        // [VITAL] Time Frame
-        let end = Instant::now();
-        let cpu_time = end - start;
-        println!("CPU {:?}", cpu_time);
-
-        // [VITAL] Delay Update
-        let remaining = FRAME_PERIOD.saturating_sub(cpu_time);
-        thread::sleep(remaining); // Sleep slightly overshoots frame period
-
-        last_start = start;
-    }
+    let _ = render_thread.join(); // Ignore panic.
 }

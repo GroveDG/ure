@@ -1,3 +1,25 @@
+//! **CORE** Code in URE is flagged to give information
+//! to the developer.
+//! ***
+//! Code is flagged by importance:
+//! - `[CORE] What makes URE, URE.`
+//! - `[VITAL] Essential to most games.`
+//! - `[USEFUL] Commonly used, but may vary.`
+//! - `[TRIVIAL] Minor expected features.`
+//! - `[EXAMPLE] For instructional purposes only.`
+//!
+//! Brackets may be replaced by bolding in docs.
+//! ***
+//! Docs might have these sections:
+//!
+//! WHY
+//! -------------------------------
+//! Explains why this must be done.
+//!
+//! Other flags include:
+//! - __TEST__ Test features (remove for release).
+//! - __TODO__ Mark where work is needed.
+
 use std::{
     sync::{Arc, Barrier, Mutex, RwLock},
     thread,
@@ -12,27 +34,6 @@ mod app;
 mod game;
 mod render;
 mod sys;
-
-/// **CORE** Code in URE is flagged to give information
-/// to the developer.
-/// ***
-/// Code is flagged by importance:
-/// - `[CORE] What makes URE, URE.`
-/// - `[VITAL] Essential to most games.`
-/// - `[USEFUL] Commonly used, but may vary.`
-/// - `[EXAMPLE] For instructional purposes only.`
-///
-/// Brackets may be replaced by bolding in docs.
-/// ***
-/// Docs might have these sections:
-///
-/// WHY
-/// -------------------------------
-/// Explains why this must be done.
-///
-/// Other flags include:
-/// - __TEST__ Test features (remove for release).
-/// - __TODO__ Mark where work is needed.
 
 fn main() {
     // [VITAL] Initialize App

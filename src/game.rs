@@ -64,6 +64,7 @@ pub fn game(
         let delta = start - last_start;
 
         delete.start_frame();
+        delete.apply(&mut uids);
 
         // [VITAL] Acquire Input State
         let input_state = {
@@ -73,7 +74,7 @@ pub fn game(
             input.clone()
         };
 
-        // [VITAL] Close Windows and Delete
+        // [USEFUL] Delete Window on Close
         {
             let mut windows = windows.write().unwrap();
             delete.apply(windows.deref_mut());
@@ -81,7 +82,7 @@ pub fn game(
                 delete.delete(windows.deref_mut(), window);
             }
         }
-        // [VITAL] Exit if No Windows
+        // [USEFUL] Exit if No Windows
         {
             let windows = windows.read().unwrap();
             if windows.is_empty() {

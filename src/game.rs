@@ -1,18 +1,18 @@
 use std::{
-    ops::DerefMut, sync::{Arc, Barrier, Mutex, RwLock}, time::{Duration, Instant}
+    ops::DerefMut,
+    sync::{Arc, Barrier, Condvar, Mutex, RwLock},
+    time::{Duration, Instant},
 };
 
-use crate::{app::UserEvent, sys::delete::DeleteQueue};
-use crate::
-    sys::{
-        UIDs,
-        gui::Layout,
-        input::Input,
-        tf::{Matrix2D, Space2D},
-        tree::Tree,
-        window::Windows,
-    }
-;
+use crate::sys::{
+    UIDs,
+    gui::Layout,
+    input::Input,
+    tf::{Matrix2D, Space2D},
+    tree::Tree,
+    window::Windows,
+};
+use crate::{app::UserEvent, render::DrawBuffer, sys::delete::DeleteQueue};
 use cgmath::SquareMatrix;
 use spin_sleep::SpinSleeper;
 use winit::event_loop::EventLoopProxy;
@@ -24,13 +24,16 @@ pub fn game(
     event_proxy: EventLoopProxy<UserEvent>,
     windows: Arc<RwLock<Windows>>,
     input: Arc<Mutex<Input>>,
-    render_sync: Arc<Barrier>,
+    draw_commands: Arc<(Mutex<DrawBuffer>, Condvar)>,
 ) {
     // [CORE] Initialize UID System
     let mut uids = UIDs::new();
 
     // [VITAL] Initialize Delete System
     let mut delete = DeleteQueue::default();
+
+    // [VITAL] Initialize Draw Buffer
+    let mut draw_buffer = DrawBuffer::default();
 
     // [USEFUL] Initialize UI Systems
     let mut layout = Layout::default();
@@ -63,6 +66,10 @@ pub fn game(
         let start = Instant::now();
         let delta = start - last_start;
 
+        // ========================================================
+        // PRE-FRAME
+        // ========================================================
+
         delete.start_frame();
         delete.apply(&mut uids);
 
@@ -73,6 +80,10 @@ pub fn game(
             };
             input.clone()
         };
+
+        // ========================================================
+        // GAME LOGIC
+        // ========================================================
 
         // [USEFUL] Delete Window on Close
         {
@@ -86,13 +97,9 @@ pub fn game(
         {
             let windows = windows.read().unwrap();
             if windows.is_empty() {
-                let _ = event_proxy.send_event(UserEvent::Exit);
                 break 'game;
             }
         }
-
-        // [VITAL] Wait for Render
-        render_sync.wait();
 
         // [USEFUL] GUI Layout
         #[cfg(feature = "GUI")]
@@ -100,6 +107,9 @@ pub fn game(
             delete.apply(&mut layout);
             layout.run();
         }
+
+        // [VITAL] Send Draw Commands to Render
+        swap_draw_buffer(&draw_commands, &mut draw_buffer);
 
         // ========================================================
         // END OF FRAME
@@ -117,4 +127,21 @@ pub fn game(
         // [VITAL] Store Start of Last Frame
         last_start = start;
     }
+
+    let _ = event_proxy.send_event(UserEvent::Exit);
+    draw_buffer.exit = true;
+    swap_draw_buffer(&draw_commands, &mut draw_buffer);
+}
+
+fn swap_draw_buffer(
+    draw_commands: &Arc<(Mutex<DrawBuffer>, Condvar)>,
+    draw_buffer: &mut DrawBuffer,
+) {
+    {
+        let Ok(mut draw_commands) = draw_commands.0.lock() else {
+            return;
+        };
+        std::mem::swap(draw_commands.deref_mut(), draw_buffer);
+    }
+    draw_commands.1.notify_all();
 }

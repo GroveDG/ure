@@ -21,12 +21,12 @@
 //! - __TODO__ Mark where work is needed.
 
 use std::{
-    sync::{Arc, Barrier, Mutex, RwLock},
+    sync::{mpsc::channel, Arc, Barrier, Condvar, Mutex, RwLock},
     thread,
 };
 
 use app::App;
-use render::render;
+use render::DrawBuffer;
 use sys::{gpu::GPU, input::Input, window::Windows};
 use winit::{error::EventLoopError, event_loop::EventLoop};
 
@@ -46,13 +46,15 @@ fn main() {
     let input = Arc::new(Mutex::new(Input::default()));
     let gpu = Arc::new(futures::executor::block_on(GPU::new()));
 
+    // [VITAL] Initialize Game-Render Communication
+    let draw_commands = Arc::new((Mutex::new(DrawBuffer::default()), Condvar::new()));
+
     // [VITAL] Initialize Render Thread
-    let frame_barrier = Arc::new(Barrier::new(2));
     let render_thread = {
         let gpu = gpu.clone();
         let windows = windows.clone();
-        let frame_barrier = frame_barrier.clone();
-        thread::spawn(|| render(frame_barrier, gpu, windows))
+        let draw_commands = draw_commands.clone();
+        thread::spawn(|| render::render(gpu, windows, draw_commands))
     };
 
     // [VITAL] Initialize Game Thread
@@ -60,7 +62,7 @@ fn main() {
         let event_proxy = event_loop.create_proxy();
         let input = Arc::clone(&input);
         let windows = windows.clone();
-        thread::spawn(|| game::game(event_proxy, windows, input, frame_barrier))
+        thread::spawn(|| game::game(event_proxy, windows, input, draw_commands))
     };
 
     // [VITAL] Run App
@@ -70,6 +72,7 @@ fn main() {
         input,
     };
     if let Err(e) = event_loop.run_app(&mut app) {
+        // [TRIVIAL] Expose Errors
         match e {
             EventLoopError::NotSupported(_) => {
                 println!("Operation unsupported (unspecified by winit)");

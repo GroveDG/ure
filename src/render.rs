@@ -1,10 +1,10 @@
 //! Beware all ye who enter here!
-//! 
+//!
 //! GPU programming is complex, nuanced, and laden
 //! decades of difficult optimization. This version
 //! of URE, and likely many others, use [WGPU][wgpu]
 //! which is the best, and only, GPU Rust module.
-//! 
+//!
 //! WGPU is a compelling library once the pieces
 //! click into place, but is still very tricky and
 //! prone to unexpected crashes in multi-threaded
@@ -12,34 +12,61 @@
 //! [https://sotrh.github.io/learn-wgpu/].
 
 use std::{
-    collections::HashMap,
-    sync::{Arc, Barrier, Condvar, Mutex, RwLock},
+    collections::{HashMap, VecDeque},
+    sync::{Arc, Barrier, Condvar, Mutex, RwLock, mpsc::Receiver},
     time::Instant,
 };
 
-use wgpu::SurfaceConfiguration;
+use wgpu::{Color, SurfaceConfiguration};
+
+/// A queue-able abstract form of rendering.
+///
+/// Renderers receive these commands over threaded
+/// channels. These commands are more abstract than
+/// GPU render commands. Commands contain either
+/// simple [Copy]-able structs or [UID][super::UID]s
+/// to reference larger resources which may need to
+/// be loaded in.
+///
+/// This allows a seperation of the nitty-gritty GPU
+/// instructions and the developer's intentions and
+/// systems. It also allows GPU communication to be
+/// moved off thread without blocking or jeapordizing
+/// frame-by-frame updates.
+#[derive(Debug)]
+pub enum DrawCommand {
+    Clear(Color),
+
+    Submit,
+}
+#[derive(Debug, Default)]
+pub struct DrawBuffer {
+    pub exit: bool,
+    commands: VecDeque<DrawCommand>,
+}
 
 use crate::sys::{gpu::GPU, window::Windows};
 
-#[derive(Debug, Clone, Copy)]
-pub enum RenderStatus {
-    Wait,
-    Render,
-    Break,
-}
-
 pub fn render(
-    frame_barrier: Arc<Barrier>,
     gpu: Arc<GPU>,
     windows: Arc<RwLock<Windows>>,
+    draw_commands: Arc<(Mutex<DrawBuffer>, Condvar)>,
 ) {
     let mut surface_sizes = HashMap::new();
 
     'render: loop {
-        frame_barrier.wait();
+        let Ok(draw_commands) = draw_commands.1.wait(draw_commands.0.lock().unwrap()) else {
+            break 'render;
+        };
 
         let start = Instant::now();
 
+        if draw_commands.exit {
+            break 'render;
+        }
+
+        // Keep windows alive to prevent surface drop.
+        let mut windows_arc = Vec::new();
         let mut surface_textures = Vec::new();
         {
             let Ok(surfaces) = windows.read() else {
@@ -66,7 +93,8 @@ pub fn render(
                 surface_textures.push((
                     surface.capabilities.formats[0],
                     surface.surface.get_current_texture().unwrap(),
-                ))
+                ));
+                windows_arc.push(surface.window.clone());
             }
         }
 

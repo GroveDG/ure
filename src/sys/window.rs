@@ -12,7 +12,7 @@ use winit::{
 
 use crate::app::UserEvent;
 
-use super::{BiComponents, Components, UID, gpu::GPU};
+use super::{delete::Delete, gpu::GPU, BiComponents, Components, UID};
 
 #[derive(Debug, Default)]
 pub struct Windows<'a> {
@@ -76,8 +76,10 @@ impl<'a> Windows<'a> {
     pub fn get_uid(&self, window_id: &WindowId) -> Option<&UID> {
         self.window_ids.get_by_right(window_id)
     }
-    pub fn remove(&mut self, uid: &UID) -> Option<WindowSurface> {
+}
+impl<'a> Delete for Windows<'a> {
+    fn delete(&mut self, uid: &UID) {
         self.window_ids.remove_by_left(uid);
-        self.windows.remove(uid)
+        self.windows.remove(uid);
     }
 }

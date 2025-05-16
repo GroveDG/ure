@@ -1,11 +1,9 @@
 use std::{
-    sync::{Arc, Barrier, Condvar, Mutex, RwLock},
-    time::{Duration, Instant},
+    ops::DerefMut, sync::{Arc, Barrier, Mutex, RwLock}, time::{Duration, Instant}
 };
 
-use crate::{app::UserEvent, render::RenderStatus};
-use crate::{
-    render,
+use crate::{app::UserEvent, sys::delete::{Delete, DeleteQueue}};
+use crate::
     sys::{
         UIDs,
         gui::Layout,
@@ -13,8 +11,8 @@ use crate::{
         tf::{Matrix2D, Space2D},
         tree::Tree,
         window::Windows,
-    },
-};
+    }
+;
 use cgmath::SquareMatrix;
 use spin_sleep::SpinSleeper;
 use winit::event_loop::EventLoopProxy;
@@ -30,6 +28,9 @@ pub fn game(
 ) {
     // [CORE] Initialize UID System
     let mut uids = UIDs::new();
+
+    // [VITAL] Initialize Delete System
+    let mut delete = DeleteQueue::default();
 
     // [USEFUL] Initialize UI Systems
     let mut layout = Layout::default();
@@ -62,7 +63,25 @@ pub fn game(
         let start = Instant::now();
         let delta = start - last_start;
 
-        // [VITAL] Exit if no Windows
+        delete.start_frame();
+
+        // [VITAL] Acquire Input State
+        let input_state = {
+            let Ok(input) = input.lock() else {
+                break 'game;
+            };
+            input.clone()
+        };
+
+        // [VITAL] Close Windows and Delete
+        {
+            let mut windows = windows.write().unwrap();
+            delete.apply(windows.deref_mut());
+            for window in input_state.close {
+                delete.delete(windows.deref_mut(), window);
+            }
+        }
+        // [VITAL] Exit if No Windows
         {
             let windows = windows.read().unwrap();
             if windows.is_empty() {
@@ -74,17 +93,10 @@ pub fn game(
         // [VITAL] Wait for Render
         render_sync.wait();
 
-        // [VITAL] Acquire Input State
-        let input_state = {
-            let Ok(input) = input.lock() else {
-                break 'game;
-            };
-            input.clone()
-        };
-
         // [USEFUL] GUI Layout
         #[cfg(feature = "GUI")]
         {
+            delete.apply(&mut layout);
             layout.run();
         }
 

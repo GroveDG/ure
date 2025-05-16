@@ -10,7 +10,7 @@ use crate::sys::{
     tree::{DFSPost, Tree},
 };
 
-use super::{gpu::{render2d::Rect, Pixels}, tf::Precision};
+use super::{delete::Delete, gpu::{render2d::Rect, Pixels}, tf::Precision};
 
 /// Layout is not Rendering, the two passes cannot happen at once.
 ///
@@ -106,6 +106,12 @@ impl Layout {
         self.lay.insert(uid, lay);
         self.out.insert(uid, Default::default());
         self.tree.insert(uid, parent);
+    }
+}
+impl Delete for Layout {
+    fn delete(&mut self, uid: &UID) {
+        self.lay.remove(uid);
+        self.out.remove(uid);
     }
 }
 

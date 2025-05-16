@@ -1,3 +1,16 @@
+//! Beware all ye who enter here!
+//! 
+//! GPU programming is complex, nuanced, and laden
+//! decades of difficult optimization. This version
+//! of URE, and likely many others, use [WGPU][wgpu]
+//! which is the best, and only, GPU Rust module.
+//! 
+//! WGPU is a compelling library once the pieces
+//! click into place, but is still very tricky and
+//! prone to unexpected crashes in multi-threaded
+//! environments. Please see [this amazing tutorial]
+//! [https://sotrh.github.io/learn-wgpu/].
+
 use std::{
     collections::HashMap,
     sync::{Arc, Barrier, Condvar, Mutex, RwLock},

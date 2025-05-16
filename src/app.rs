@@ -31,16 +31,19 @@ impl<'a> ApplicationHandler<UserEvent> for App<'a> {
     ) {
         match event {
             WindowEvent::CloseRequested => {
-                let Ok(mut windows) = self.windows.write() else {
+                let Ok(mut input) = self.input.lock() else {
                     event_loop.exit();
                     return;
                 };
-                let Some(uid) = windows.get_uid(&window_id).copied() else {
+                let Ok(windows) = self.windows.read() else {
+                    event_loop.exit();
                     return;
                 };
-                windows.remove(&uid).unwrap();
+                let Some(uid) = windows.get_uid(&window_id) else {
+                    return;
+                };
+                input.close.insert(*uid);
             }
-            WindowEvent::RedrawRequested => {}
             _ => {}
         }
     }

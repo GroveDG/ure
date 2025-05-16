@@ -16,6 +16,7 @@ pub mod input;
 pub mod assets;
 pub mod window;
 pub mod gpu;
+pub mod delete;
 
 pub type Components<C> = HashMap<UID, C>;
 pub type BiComponents<C> = BiHashMap<UID, C>;

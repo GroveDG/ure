@@ -1,5 +1,5 @@
 use std::{
-    sync::{Arc, Barrier, Condvar, Mutex, RwLock},
+    sync::{Arc, Barrier, Mutex, RwLock},
     thread,
 };
 

@@ -1,6 +1,6 @@
 use std::{
     ops::DerefMut,
-    sync::{Arc, Barrier, Condvar, Mutex, RwLock},
+    sync::{Arc, Condvar, Mutex, RwLock},
     time::{Duration, Instant},
 };
 
@@ -87,16 +87,26 @@ pub fn game(
 
         // [USEFUL] Delete Window on Close
         {
-            let mut windows = windows.write().unwrap();
-            delete.apply(windows.deref_mut());
-            for window in input_state.close {
-                delete.delete(windows.deref_mut(), window);
+            // [USEFUL] Prevent write lock when no deletes are needed.
+            let needs_delete = {
+                let Ok(windows) = windows.read() else {
+                    break 'game;
+                };
+                windows.windows.keys().any(|uid| delete.contains(uid))
+            };
+            if needs_delete || !input_state.close.is_empty() {
+                let mut windows = windows.write().unwrap();
+                delete.apply(windows.deref_mut());
+                for window in input_state.close {
+                    delete.delete(windows.deref_mut(), window);
+                }
             }
         }
         // [USEFUL] Exit if No Windows
         {
             let windows = windows.read().unwrap();
-            if windows.is_empty() {
+            if windows.windows.is_empty() && windows.requested == 0 {
+                println!("Close");
                 break 'game;
             }
         }
@@ -108,6 +118,8 @@ pub fn game(
             layout.run();
         }
 
+        println!("CPU {:?}", start.elapsed());
+
         // [VITAL] Send Draw Commands to Render
         swap_draw_buffer(&draw_commands, &mut draw_buffer);
 
@@ -116,9 +128,8 @@ pub fn game(
         // ========================================================
 
         // [VITAL] Time Frame
-        let end = Instant::now();
-        let cpu_time = end - start;
-        println!("CPU {:?}", cpu_time);
+        let cpu_time = start.elapsed();
+        // println!("CPU {:?}", cpu_time);
 
         // [VITAL] Delay Update
         let remaining = FRAME_PERIOD.saturating_sub(cpu_time);

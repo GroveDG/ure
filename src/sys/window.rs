@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use wgpu::{Surface, SurfaceCapabilities};
+use wgpu::{Surface, SurfaceCapabilities, TextureFormat};
 use winit::{
     event_loop::{EventLoopClosed, EventLoopProxy},
     window::{Window, WindowAttributes, WindowId},
@@ -12,16 +12,15 @@ use super::{BiComponents, Components, UID, delete::Delete, gpu::GPU};
 
 #[derive(Debug, Default)]
 pub struct Windows<'a> {
-    windows: Components<WindowSurface<'a>>,
-    window_ids: BiComponents<WindowId>,
-    requested: u8,
+    pub windows: Components<WindowSurface<'a>>,
+    pub window_ids: BiComponents<WindowId>,
+    pub requested: u8,
 }
 
 #[derive(Debug)]
 pub struct WindowSurface<'a> {
     pub window: Arc<Window>,
     pub surface: Surface<'a>,
-    pub capabilities: SurfaceCapabilities,
 }
 
 impl<'a> Windows<'a> {
@@ -45,32 +44,15 @@ impl<'a> Windows<'a> {
     }
     pub fn insert(&mut self, uid: UID, window_id: WindowId, window: Arc<Window>, gpu: &GPU) {
         let surface = gpu.instance.create_surface(window.clone()).unwrap();
-        let capabilities = surface.get_capabilities(&gpu.adapter);
         self.windows.insert(
             uid,
             WindowSurface {
                 window,
                 surface,
-                capabilities,
             },
         );
         self.window_ids.insert(uid, window_id);
         self.requested = self.requested.saturating_sub(1);
-    }
-    pub fn get(&self, uid: &UID) -> Option<&WindowSurface> {
-        self.windows.get(uid)
-    }
-    pub fn is_empty(&self) -> bool {
-        self.requested == 0 && self.windows.is_empty()
-    }
-    pub fn iter(&self) -> impl Iterator<Item = (&UID, &WindowSurface)> {
-        self.windows.iter()
-    }
-    pub fn values(&self) -> impl Iterator<Item = &WindowSurface> {
-        self.windows.values()
-    }
-    pub fn get_uid(&self, window_id: &WindowId) -> Option<&UID> {
-        self.window_ids.get_by_right(window_id)
     }
 }
 impl<'a> Delete for Windows<'a> {

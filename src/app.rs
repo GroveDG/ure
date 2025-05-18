@@ -39,7 +39,7 @@ impl<'a> ApplicationHandler<UserEvent> for App<'a> {
                     event_loop.exit();
                     return;
                 };
-                let Some(uid) = windows.get_uid(&window_id) else {
+                let Some(uid) = windows.window_ids.get_by_right(&window_id) else {
                     return;
                 };
                 input.close.insert(*uid);
@@ -61,7 +61,6 @@ impl<'a> ApplicationHandler<UserEvent> for App<'a> {
                         .expect("Window creation failed. See winit::event_loop::ActiveEventLoop."),
                 );
                 windows.insert(uid, window.id(), window.clone(), &self.gpu);
-                println!("Configured");
             }
             UserEvent::Exit => {
                 event_loop.exit();

@@ -12,40 +12,36 @@
 //! [https://sotrh.github.io/learn-wgpu/].
 
 use std::{
-    collections::{HashMap, VecDeque},
-    sync::{Arc, Barrier, Condvar, Mutex, RwLock, mpsc::Receiver},
+    collections::HashMap,
+    sync::{Arc, Condvar, Mutex, RwLock},
     time::Instant,
 };
 
 use wgpu::{Color, SurfaceConfiguration};
 
-/// A queue-able abstract form of rendering.
-///
-/// Renderers receive these commands over threaded
-/// channels. These commands are more abstract than
-/// GPU render commands. Commands contain either
-/// simple [Copy]-able structs or [UID][super::UID]s
-/// to reference larger resources which may need to
-/// be loaded in.
-///
-/// This allows a seperation of the nitty-gritty GPU
-/// instructions and the developer's intentions and
-/// systems. It also allows GPU communication to be
-/// moved off thread without blocking or jeapordizing
-/// frame-by-frame updates.
-#[derive(Debug)]
-pub enum DrawCommand {
-    Clear(Color),
+use crate::sys::{
+    gpu::{render2d::{Commands2D, Render2D}, GPU},
+    window::Windows,
+};
 
-    Submit,
-}
 #[derive(Debug, Default)]
 pub struct DrawBuffer {
     pub exit: bool,
-    commands: VecDeque<DrawCommand>,
+    pub clear: Color,
+    pub commands_2d: Commands2D,
 }
 
-use crate::sys::{gpu::GPU, window::Windows};
+// The only guarenteed color formats
+// 
+// WGPU wants you to manage this per surface,
+// but render pipelines and shaders (which are
+// created before any windows) must know the
+// format they're outputting to.
+//
+// This constant approach procludes things
+// like HDR rendering and output.
+// pub const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
+pub const SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
 
 pub fn render(
     gpu: Arc<GPU>,
@@ -53,6 +49,7 @@ pub fn render(
     draw_commands: Arc<(Mutex<DrawBuffer>, Condvar)>,
 ) {
     let mut surface_sizes = HashMap::new();
+    let render_2d = Render2D::new(&gpu);
 
     'render: loop {
         let Ok(draw_commands) = draw_commands.1.wait(draw_commands.0.lock().unwrap()) else {
@@ -73,14 +70,14 @@ pub fn render(
                 break 'render;
             };
 
-            for (uid, surface) in surfaces.iter() {
+            for (uid, surface) in surfaces.windows.iter() {
                 let surface_size = surface_sizes.get(uid);
                 let window_size = surface.window.inner_size();
                 if surface_size.is_none_or(|surface_size| *surface_size != window_size) {
                     let config = SurfaceConfiguration {
                         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                        format: surface.capabilities.formats[0],
-                        view_formats: vec![surface.capabilities.formats[0].add_srgb_suffix()],
+                        format: SURFACE_FORMAT,
+                        view_formats: vec![],
                         alpha_mode: wgpu::CompositeAlphaMode::Auto,
                         width: window_size.width,
                         height: window_size.height,
@@ -90,34 +87,31 @@ pub fn render(
                     surface.surface.configure(&gpu.device, &config);
                     surface_sizes.insert(*uid, window_size);
                 }
-                surface_textures.push((
-                    surface.capabilities.formats[0],
-                    surface.surface.get_current_texture().unwrap(),
-                ));
+                surface_textures.push(surface.surface.get_current_texture().unwrap());
                 windows_arc.push(surface.window.clone());
             }
         }
 
         let mut encoder = gpu.device.create_command_encoder(&Default::default());
 
-        for (surface_format, surface_texture) in surface_textures.iter() {
+        for surface_texture in surface_textures.iter() {
             // Set-up surface.
             let texture_view = surface_texture
                 .texture
                 .create_view(&wgpu::TextureViewDescriptor {
-                    format: Some(surface_format.add_srgb_suffix()),
+                    format: Some(SURFACE_FORMAT),
                     ..Default::default()
                 });
 
             // [USEFUL] 2D Rendering
             {
-                let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: None,
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &texture_view,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
+                            load: wgpu::LoadOp::Clear(draw_commands.clear),
                             store: wgpu::StoreOp::Store,
                         },
                     })],
@@ -126,17 +120,14 @@ pub fn render(
                     occlusion_query_set: None,
                 });
 
-                // // [USEFUL] GUI Rendering
-                // #[cfg(feature = "GUI")]
-                // for node in layout.render_order() {
-                //     box_renderer.render(node, window, &layout);
-                // }
+                render_pass.set_pipeline(&render_2d.pipeline);
+                render_pass.draw(0..3, 0..1);
             }
         }
 
         gpu.queue.submit([encoder.finish()]);
 
-        for (_, surface_texture) in surface_textures {
+        for surface_texture in surface_textures {
             surface_texture.present();
         }
 

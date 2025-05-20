@@ -13,6 +13,7 @@
 
 use std::{
     collections::HashMap,
+    hint::black_box,
     sync::{Arc, Condvar, Mutex, RwLock},
     time::Instant,
 };
@@ -20,7 +21,10 @@ use std::{
 use wgpu::{Color, SurfaceConfiguration};
 
 use crate::sys::{
-    gpu::{render2d::{Commands2D, Render2D}, GPU},
+    gpu::{
+        GPU,
+        render2d::{Commands2D, Render2D},
+    },
     window::Windows,
 };
 
@@ -32,7 +36,7 @@ pub struct DrawBuffer {
 }
 
 // The only guarenteed color formats
-// 
+//
 // WGPU wants you to manage this per surface,
 // but render pipelines and shaders (which are
 // created before any windows) must know the
@@ -84,7 +88,7 @@ pub fn render(
                         desired_maximum_frame_latency: 2,
                         present_mode: wgpu::PresentMode::AutoVsync,
                     };
-                    surface.surface.configure(&gpu.device, &config);
+                    black_box(surface.surface.configure(&gpu.device, &config));
                     surface_sizes.insert(*uid, window_size);
                 }
                 surface_textures.push(surface.surface.get_current_texture().unwrap());

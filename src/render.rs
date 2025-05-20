@@ -88,7 +88,7 @@ pub fn render(
                         desired_maximum_frame_latency: 2,
                         present_mode: wgpu::PresentMode::AutoVsync,
                     };
-                    black_box(surface.surface.configure(&gpu.device, &config));
+                    surface.surface.configure(&gpu.device, &config);
                     surface_sizes.insert(*uid, window_size);
                 }
                 surface_textures.push(surface.surface.get_current_texture().unwrap());
@@ -129,7 +129,7 @@ pub fn render(
             }
         }
 
-        gpu.queue.submit([encoder.finish()]);
+        black_box(gpu.queue.submit([encoder.finish()]));
 
         for surface_texture in surface_textures {
             surface_texture.present();

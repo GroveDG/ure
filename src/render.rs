@@ -67,12 +67,13 @@ pub fn render(
         let start = Instant::now();
 
         // Keep windows alive to prevent surface drop.
-        let mut windows_arc = Vec::new();
+        let mut surface_arc = Vec::new();
         let mut surface_textures = Vec::new();
         {
             let windows = windows.read();
 
             for (uid, surface) in windows.windows.iter() {
+                surface_arc.push(surface.clone());
                 let surface_size = surface_sizes.get(uid);
                 let window_size = surface.window.inner_size();
                 if surface_size.is_none_or(|surface_size| *surface_size != window_size) {
@@ -90,7 +91,6 @@ pub fn render(
                     surface_sizes.insert(*uid, window_size);
                 }
                 surface_textures.push(surface.surface.get_current_texture().unwrap());
-                windows_arc.push(surface.window.clone());
             }
         }
 
@@ -133,6 +133,8 @@ pub fn render(
         for surface_texture in surface_textures {
             surface_texture.present();
         }
+
+        black_box(drop(surface_arc));
 
         println!("GPU {:?}", start.elapsed());
 

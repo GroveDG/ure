@@ -12,7 +12,7 @@ use super::{BiComponents, Components, UID, delete::Delete, gpu::GPU};
 
 #[derive(Debug, Default)]
 pub struct Windows<'a> {
-    pub windows: Components<WindowSurface<'a>>,
+    pub windows: Components<Arc<WindowSurface<'a>>>,
     pub window_ids: BiComponents<WindowId>,
     pub requested: u8,
 }
@@ -46,10 +46,10 @@ impl<'a> Windows<'a> {
         let surface = gpu.instance.create_surface(window.clone()).unwrap();
         self.windows.insert(
             uid,
-            WindowSurface {
+            Arc::new(WindowSurface {
                 window,
                 surface,
-            },
+            }),
         );
         self.window_ids.insert(uid, window_id);
         self.requested = self.requested.saturating_sub(1);

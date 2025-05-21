@@ -23,7 +23,7 @@
 use std::{
     ops::DerefMut,
     sync::{Arc, atomic::AtomicBool, mpsc::channel},
-    thread,
+    thread::{self, park},
     time::Duration,
 };
 
@@ -91,7 +91,6 @@ fn main() {
                 for _ in 0..2 {
                     let _ = parked.recv();
                     if game.is_finished() || render.is_finished() {
-                        let _ = event_proxy.send_event(app::UserEvent::Exit);
                         quit.store(true, std::sync::atomic::Ordering::Relaxed);
                         game.thread().unpark();
                         render.thread().unpark();
@@ -99,6 +98,7 @@ fn main() {
                         println!("game joined");
                         let _ = render.join();
                         println!("render joined");
+                        let _ = event_proxy.send_event(app::UserEvent::Exit);
                         return;
                     }
                 }

@@ -1,4 +1,5 @@
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
+use parking_lot::{Mutex, RwLock};
 
 use winit::{
     application::ApplicationHandler, event::WindowEvent, event_loop::ActiveEventLoop,
@@ -31,14 +32,8 @@ impl<'a> ApplicationHandler<UserEvent> for App<'a> {
     ) {
         match event {
             WindowEvent::CloseRequested => {
-                let Ok(mut input) = self.input.lock() else {
-                    event_loop.exit();
-                    return;
-                };
-                let Ok(windows) = self.windows.read() else {
-                    event_loop.exit();
-                    return;
-                };
+                let mut input = self.input.lock();
+                let windows = self.windows.read();
                 let Some(uid) = windows.window_ids.get_by_right(&window_id) else {
                     return;
                 };
@@ -51,10 +46,7 @@ impl<'a> ApplicationHandler<UserEvent> for App<'a> {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::NewWindow(uid, attr) => {
-                let Ok(mut windows) = self.windows.write() else {
-                    event_loop.exit();
-                    return;
-                };
+                let mut windows = self.windows.write();
                 let window = Arc::new(
                     event_loop
                         .create_window(attr)

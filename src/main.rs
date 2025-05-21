@@ -21,12 +21,17 @@
 //! - __TODO__ Mark where work is needed.
 
 use std::{
-    sync::{mpsc::channel, Arc, Barrier, Condvar, Mutex, RwLock},
+    ops::DerefMut,
+    sync::{Arc, atomic::AtomicBool, mpsc::channel},
     thread,
+    time::Duration,
 };
+
+use parking_lot::{Condvar, Mutex, RwLock};
 
 use app::App;
 use render::DrawBuffer;
+use spin_sleep::SpinSleeper;
 use sys::{gpu::GPU, input::Input, window::Windows};
 use winit::{error::EventLoopError, event_loop::EventLoop};
 
@@ -46,23 +51,67 @@ fn main() {
     let input = Arc::new(Mutex::new(Input::default()));
     let gpu = Arc::new(futures::executor::block_on(GPU::new()));
 
-    // [VITAL] Initialize Game-Render Communication
-    let draw_commands = Arc::new((Mutex::new(DrawBuffer::default()), Condvar::new()));
+    // [VITAL] Initialize Thread Communication
+    let draw_buffer = Arc::new(Mutex::new(DrawBuffer::default()));
+    let draw_render = Arc::new(Mutex::new(DrawBuffer::default()));
+    let quit = Arc::new(AtomicBool::new(false));
+    let (parker, parked) = channel();
 
     // [VITAL] Initialize Render Thread
-    let render_thread = {
+    let render = {
         let gpu = gpu.clone();
         let windows = windows.clone();
-        let draw_commands = draw_commands.clone();
-        thread::spawn(|| render::render(gpu, windows, draw_commands))
+        let draw = draw_render.clone();
+        let quit = quit.clone();
+        let parker = parker.clone();
+        thread::spawn(|| render::render(gpu, windows, draw, quit, parker))
     };
 
     // [VITAL] Initialize Game Thread
-    let game_thread = {
+    let game = {
         let event_proxy = event_loop.create_proxy();
         let input = Arc::clone(&input);
         let windows = windows.clone();
-        thread::spawn(|| game::game(event_proxy, windows, input, draw_commands))
+        let draw = draw_buffer.clone();
+        let quit = quit.clone();
+        thread::spawn(|| game::game(event_proxy, windows, input, draw, quit, parker))
+    };
+
+    let timing = {
+        let timer = SpinSleeper::default();
+        let event_proxy = event_loop.create_proxy();
+        let quit = quit.clone();
+
+        // [VITAL] Frame Period (Inverse of FPS)
+        const FRAME_PERIOD: Duration = Duration::new(0, 0_016_660_000);
+
+        thread::spawn(move || {
+            loop {
+                timer.sleep(FRAME_PERIOD);
+                for _ in 0..2 {
+                    let _ = parked.recv();
+                    if game.is_finished() || render.is_finished() {
+                        let _ = event_proxy.send_event(app::UserEvent::Exit);
+                        quit.store(true, std::sync::atomic::Ordering::Relaxed);
+                        game.thread().unpark();
+                        render.thread().unpark();
+                        let _ = game.join();
+                        println!("game joined");
+                        let _ = render.join();
+                        println!("render joined");
+                        return;
+                    }
+                }
+                // [VITAL] Swap Draw Buffers
+                {
+                    let mut draw_buffer = draw_buffer.lock();
+                    let mut draw_render = draw_render.lock();
+                    std::mem::swap(draw_buffer.deref_mut(), draw_render.deref_mut());
+                }
+                game.thread().unpark();
+                render.thread().unpark();
+            }
+        })
     };
 
     // [VITAL] Run App
@@ -92,6 +141,6 @@ fn main() {
     // [VITAL] Cleanup
     // Prevent detatched thread.
     // (See std::thread::Thread)
-    let _ = game_thread.join(); // Ignore panic.
-    let _ = render_thread.join(); // Ignore panic.
+    quit.store(true, std::sync::atomic::Ordering::Relaxed);
+    let _ = timing.join();
 }

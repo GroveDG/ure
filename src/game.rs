@@ -1,6 +1,7 @@
 use std::{
     ops::DerefMut,
-    sync::{Arc, Condvar, Mutex, RwLock},
+    sync::{Arc, atomic::AtomicBool, mpsc::Sender},
+    thread,
     time::{Duration, Instant},
 };
 
@@ -14,17 +15,16 @@ use crate::sys::{
 };
 use crate::{app::UserEvent, render::DrawBuffer, sys::delete::DeleteQueue};
 use cgmath::SquareMatrix;
-use spin_sleep::SpinSleeper;
+use parking_lot::{Condvar, Mutex, RwLock};
 use winit::event_loop::EventLoopProxy;
-
-// [VITAL] Frame Period (Inverse of FPS)
-const FRAME_PERIOD: Duration = Duration::new(0, 0_016_660_000);
 
 pub fn game(
     event_proxy: EventLoopProxy<UserEvent>,
     windows: Arc<RwLock<Windows>>,
     input: Arc<Mutex<Input>>,
-    draw_commands: Arc<(Mutex<DrawBuffer>, Condvar)>,
+    draw: Arc<Mutex<DrawBuffer>>,
+    quit: Arc<AtomicBool>,
+    parker: Sender<()>,
 ) {
     // [CORE] Initialize UID System
     let mut uids = UIDs::new();
@@ -47,7 +47,7 @@ pub fn game(
     tree.insert(root, None);
     space.insert(root, Matrix2D::identity());
     {
-        let mut windows = windows.write().unwrap();
+        let mut windows = windows.write();
         if windows
             .request_new(root, Default::default(), &event_proxy)
             .is_err()
@@ -57,7 +57,6 @@ pub fn game(
     }
 
     // [VITAL] Frame Timing
-    let frame_timer = SpinSleeper::default();
     let mut last_start = Instant::now(); // Last frame start
 
     // [VITAL] Game Loop
@@ -74,12 +73,7 @@ pub fn game(
         delete.apply(&mut uids);
 
         // [VITAL] Acquire Input State
-        let input_state = {
-            let Ok(input) = input.lock() else {
-                break 'game;
-            };
-            input.clone()
-        };
+        let input_state = input.lock().clone();
 
         // ========================================================
         // GAME LOGIC
@@ -89,13 +83,11 @@ pub fn game(
         {
             // [USEFUL] Prevent write lock when no deletes are needed.
             let needs_delete = {
-                let Ok(windows) = windows.read() else {
-                    break 'game;
-                };
+                let windows = windows.read();
                 windows.windows.keys().any(|uid| delete.contains(uid))
             };
             if needs_delete || !input_state.close.is_empty() {
-                let mut windows = windows.write().unwrap();
+                let mut windows = windows.write();
                 delete.apply(windows.deref_mut());
                 for window in input_state.close {
                     delete.delete(windows.deref_mut(), window);
@@ -104,7 +96,7 @@ pub fn game(
         }
         // [USEFUL] Exit if No Windows
         {
-            let windows = windows.read().unwrap();
+            let windows = windows.read();
             if windows.windows.is_empty() && windows.requested == 0 {
                 println!("Close");
                 break 'game;
@@ -118,10 +110,9 @@ pub fn game(
             layout.run();
         }
 
-        println!("CPU {:?}", start.elapsed());
-
-        // [VITAL] Send Draw Commands to Render
-        swap_draw_buffer(&draw_commands, &mut draw_buffer);
+        {
+            let draw = draw.lock();
+        }
 
         // ========================================================
         // END OF FRAME
@@ -129,30 +120,13 @@ pub fn game(
 
         // [VITAL] Time Frame
         let cpu_time = start.elapsed();
-        // println!("CPU {:?}", cpu_time);
-
-        // [VITAL] Delay Update
-        let remaining = FRAME_PERIOD.saturating_sub(cpu_time);
-        frame_timer.sleep(remaining); // Sleep slightly overshoots frame period
+        println!("CPU {:?}", cpu_time);
 
         // [VITAL] Store Start of Last Frame
         last_start = start;
-    }
 
-    let _ = event_proxy.send_event(UserEvent::Exit);
-    draw_buffer.exit = true;
-    swap_draw_buffer(&draw_commands, &mut draw_buffer);
-}
-
-fn swap_draw_buffer(
-    draw_commands: &Arc<(Mutex<DrawBuffer>, Condvar)>,
-    draw_buffer: &mut DrawBuffer,
-) {
-    {
-        let Ok(mut draw_commands) = draw_commands.0.lock() else {
-            return;
-        };
-        std::mem::swap(draw_commands.deref_mut(), draw_buffer);
+        let _ = parker.send(());
+        thread::park();
     }
-    draw_commands.1.notify_all();
+    let _ = parker.send(());
 }

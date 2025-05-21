@@ -11,13 +11,15 @@
 //! environments. Please see [this amazing tutorial]
 //! [https://sotrh.github.io/learn-wgpu/].
 
+use parking_lot::{Condvar, Mutex, RwLock};
 use std::{
     collections::HashMap,
     hint::black_box,
-    sync::{Arc, Condvar, Mutex, RwLock},
+    ops::DerefMut,
+    sync::{Arc, atomic::AtomicBool, mpsc::Sender},
+    thread,
     time::Instant,
 };
-
 use wgpu::{Color, SurfaceConfiguration};
 
 use crate::sys::{
@@ -50,31 +52,27 @@ pub const SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormS
 pub fn render(
     gpu: Arc<GPU>,
     windows: Arc<RwLock<Windows>>,
-    draw_commands: Arc<(Mutex<DrawBuffer>, Condvar)>,
+    draw: Arc<Mutex<DrawBuffer>>,
+    exit: Arc<AtomicBool>,
+    parker: Sender<()>,
 ) {
     let mut surface_sizes = HashMap::new();
     let render_2d = Render2D::new(&gpu);
 
     'render: loop {
-        let Ok(draw_commands) = draw_commands.1.wait(draw_commands.0.lock().unwrap()) else {
-            break 'render;
-        };
-
-        let start = Instant::now();
-
-        if draw_commands.exit {
+        if exit.load(std::sync::atomic::Ordering::Relaxed) {
             break 'render;
         }
+
+        let start = Instant::now();
 
         // Keep windows alive to prevent surface drop.
         let mut windows_arc = Vec::new();
         let mut surface_textures = Vec::new();
         {
-            let Ok(surfaces) = windows.read() else {
-                break 'render;
-            };
+            let windows = windows.read();
 
-            for (uid, surface) in surfaces.windows.iter() {
+            for (uid, surface) in windows.windows.iter() {
                 let surface_size = surface_sizes.get(uid);
                 let window_size = surface.window.inner_size();
                 if surface_size.is_none_or(|surface_size| *surface_size != window_size) {
@@ -109,13 +107,14 @@ pub fn render(
 
             // [USEFUL] 2D Rendering
             {
+                let draw = draw.lock();
                 let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: None,
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &texture_view,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(draw_commands.clear),
+                            load: wgpu::LoadOp::Clear(draw.clear),
                             store: wgpu::StoreOp::Store,
                         },
                     })],
@@ -135,8 +134,10 @@ pub fn render(
             surface_texture.present();
         }
 
-        let end = Instant::now();
+        println!("GPU {:?}", start.elapsed());
 
-        // println!("GPU {:?}", end - start);
+        let _ = parker.send(());
+        thread::park();
     }
+    let _ = parker.send(());
 }

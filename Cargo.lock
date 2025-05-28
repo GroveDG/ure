@@ -1326,19 +1326,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
-name = "ron"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "beceb6f7bf81c73e73aeef6dd1356d9a1b2b4909e1f0fc3e59b034f9572d7b7f"
-dependencies = [
- "base64",
- "bitflags 2.9.0",
- "serde",
- "serde_derive",
- "unicode-ident",
-]
-
-[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1600,12 +1587,12 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "bimap",
+ "bytemuck",
  "cgmath",
  "futures",
  "parking_lot",
  "rand",
  "raw-window-handle",
- "ron",
  "serde",
  "spin_sleep",
  "wgpu",

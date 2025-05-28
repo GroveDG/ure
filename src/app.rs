@@ -1,12 +1,17 @@
 use std::sync::Arc;
-use parking_lot::{Mutex, RwLock};
 
+use parking_lot::{Mutex, RwLock};
 use winit::{
     application::ApplicationHandler, event::WindowEvent, event_loop::ActiveEventLoop,
     window::WindowAttributes,
 };
 
-use crate::sys::{UID, gpu::GPU, input::Input, window::Windows};
+use crate::sys::UID;
+
+use self::{input::Input, window::Windows};
+
+pub mod input;
+pub mod window;
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -15,13 +20,12 @@ pub enum UserEvent {
     Exit,
 }
 
-pub struct App<'a> {
-    pub gpu: Arc<GPU>,
-    pub windows: Arc<RwLock<Windows<'a>>>,
+pub struct App {
+    pub windows: Arc<RwLock<Windows>>,
     pub input: Arc<Mutex<Input>>,
 }
 
-impl<'a> ApplicationHandler<UserEvent> for App<'a> {
+impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {}
 
     fn window_event(
@@ -47,12 +51,11 @@ impl<'a> ApplicationHandler<UserEvent> for App<'a> {
         match event {
             UserEvent::NewWindow(uid, attr) => {
                 let mut windows = self.windows.write();
-                let window = Arc::new(
-                    event_loop
-                        .create_window(attr)
-                        .expect("Window creation failed. See winit::event_loop::ActiveEventLoop."),
-                );
-                windows.insert(uid, window.id(), window.clone(), &self.gpu);
+                let window = event_loop
+                    .create_window(attr)
+                    .expect("Window creation failed. See winit::event_loop::ActiveEventLoop.");
+
+                windows.insert(uid, window.id(), window);
             }
             UserEvent::Exit => {
                 event_loop.exit();

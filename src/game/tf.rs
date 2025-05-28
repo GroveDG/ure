@@ -1,5 +1,8 @@
-use super::{delete::Delete, Components, UID};
 use cgmath::SquareMatrix;
+
+use crate::sys::{Components, UID, delete::Delete};
+
+
 
 pub type Precision = f32;
 

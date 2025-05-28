@@ -1,29 +1,22 @@
 use std::sync::Arc;
 
-use wgpu::{Surface, SurfaceCapabilities, TextureFormat};
 use winit::{
     event_loop::{EventLoopClosed, EventLoopProxy},
     window::{Window, WindowAttributes, WindowId},
 };
 
-use crate::app::UserEvent;
+use crate::sys::{BiComponents, Components, UID, delete::Delete};
 
-use super::{BiComponents, Components, UID, delete::Delete, gpu::GPU};
+use super::UserEvent;
 
 #[derive(Debug, Default)]
-pub struct Windows<'a> {
-    pub windows: Components<Arc<WindowSurface<'a>>>,
+pub struct Windows {
+    pub windows: Components<Arc<Window>>,
     pub window_ids: BiComponents<WindowId>,
     pub requested: u8,
 }
 
-#[derive(Debug)]
-pub struct WindowSurface<'a> {
-    pub window: Arc<Window>,
-    pub surface: Surface<'a>,
-}
-
-impl<'a> Windows<'a> {
+impl Windows {
     /// Request a new window component to be
     /// added to the entity.
     ///
@@ -42,20 +35,16 @@ impl<'a> Windows<'a> {
         self.requested += 1;
         event_proxy.send_event(UserEvent::NewWindow(uid, attr))
     }
-    pub fn insert(&mut self, uid: UID, window_id: WindowId, window: Arc<Window>, gpu: &GPU) {
-        let surface = gpu.instance.create_surface(window.clone()).unwrap();
+    pub fn insert(&mut self, uid: UID, window_id: WindowId, window: Window) {
         self.windows.insert(
             uid,
-            Arc::new(WindowSurface {
-                window,
-                surface,
-            }),
+            Arc::new(window),
         );
         self.window_ids.insert(uid, window_id);
         self.requested = self.requested.saturating_sub(1);
     }
 }
-impl<'a> Delete for Windows<'a> {
+impl Delete for Windows {
     fn delete(&mut self, uid: &UID) {
         self.window_ids.remove_by_left(uid);
         self.windows.remove(uid);

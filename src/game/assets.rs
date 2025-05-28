@@ -5,7 +5,9 @@ use std::{
 
 // use serde::{Deserialize, Serialize};
 
-use super::{BiComponents, UIDs};
+use crate::sys::{BiComponents, UIDs};
+
+
 
 const ASSETS: &str = "./assets";
 const GIT_NULL: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";

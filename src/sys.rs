@@ -1,24 +1,21 @@
 use std::{
-    collections::{HashMap, HashSet}, fmt::{Debug, Display}, u64
+    collections::{HashMap, HashSet},
+    fmt::{Debug, Display},
+    u64,
 };
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD as B64};
 use bimap::BiHashMap;
-use delete::Delete;
 use rand::{RngCore, rngs::ThreadRng};
-
 use serde::{Deserialize, Serialize, de::Visitor};
 
-pub mod tf;
-pub mod tree;
-#[cfg(feature = "GUI")]
-pub mod gui;
-pub mod input;
-pub mod assets;
-pub mod window;
-pub mod gpu;
+use self::delete::Delete;
+
 pub mod delete;
 
+
+
+pub type Entities = HashSet<UID>;
 pub type Components<C> = HashMap<UID, C>;
 pub type BiComponents<C> = BiHashMap<UID, C>;
 
@@ -87,7 +84,7 @@ impl<'de> Deserialize<'de> for UID {
 
 #[derive(Debug, Clone)]
 pub struct UIDs {
-    ids: HashSet<UID>,
+    ids: Entities,
     rng: ThreadRng,
 }
 impl UIDs {

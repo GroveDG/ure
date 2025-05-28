@@ -5,12 +5,15 @@
 use cgmath::Vector2;
 use wgpu::Color;
 
-use crate::sys::{
-    Components, UID,
+use crate::render::gpu::Pixels;
+use crate::sys::{Components, UID, delete::Delete};
+
+use super::{
+    tf::Precision,
     tree::{DFSPost, Tree},
 };
 
-use super::{delete::Delete, gpu::{render2d::Rect, Pixels}, tf::Precision};
+
 
 /// Layout is not Rendering, the two passes cannot happen at once.
 ///
@@ -183,6 +186,20 @@ pub struct Style {
     pub color: Color,
     pub radius: Option<Pixels>,
     pub border: Option<Border>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rect {
+    pub pos: Vector2<Pixels>,
+    pub size: Vector2<Pixels>,
+}
+impl Default for Rect {
+    fn default() -> Self {
+        Self {
+            pos: Vector2 { x: 0, y: 0 },
+            size: Vector2 { x: 0, y: 0 },
+        }
+    }
 }
 
 impl Default for Lay {

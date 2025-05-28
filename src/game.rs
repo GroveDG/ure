@@ -7,7 +7,7 @@ use std::{
 
 use cgmath::SquareMatrix;
 use parking_lot::{Mutex, RwLock};
-use winit::event_loop::EventLoopProxy;
+use winit::{event_loop::EventLoopProxy, window::WindowAttributes};
 
 use crate::app::{UserEvent, input::Input, window::Windows};
 use crate::render::{
@@ -24,8 +24,6 @@ pub mod assets;
 pub mod gui;
 pub mod tf;
 pub mod tree;
-
-
 
 pub fn game(
     event_proxy: EventLoopProxy<UserEvent>,
@@ -91,7 +89,11 @@ pub fn game(
     {
         let mut windows = windows.write();
         if windows
-            .request_new(root, Default::default(), &event_proxy)
+            .request_new(
+                root,
+                WindowAttributes::default().with_title("Untitled Rust Engine"),
+                &event_proxy,
+            )
             .is_err()
         {
             return;

@@ -2,7 +2,7 @@
 //!
 //!
 
-use cgmath::Vector2;
+use glam::Vec2;
 use wgpu::Color;
 
 use crate::render::gpu::Pixels;
@@ -45,7 +45,7 @@ impl Layout {
                 Direction::Down => (1, 0),
             };
             let mut fit = [false, false];
-            let mut out_size: Vector2<Pixels> = Vector2 { x: 0, y: 0 };
+            let mut out_size: Vec2 = Vec2::ZERO;
 
             match p_lay.size.w.sizing {
                 Sizing::Fit => fit[0] = true,
@@ -188,18 +188,10 @@ pub struct Style {
     pub border: Option<Border>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Rect {
-    pub pos: Vector2<Pixels>,
-    pub size: Vector2<Pixels>,
-}
-impl Default for Rect {
-    fn default() -> Self {
-        Self {
-            pos: Vector2 { x: 0, y: 0 },
-            size: Vector2 { x: 0, y: 0 },
-        }
-    }
+    pub pos: Vec2,
+    pub size: Vec2,
 }
 
 impl Default for Lay {
@@ -218,7 +210,7 @@ impl Default for Lay {
                 },
             },
             pad: Default::default(),
-            gap: 0,
+            gap: 0.0,
             align: Align::Left,
             direction: Direction::Down,
         }

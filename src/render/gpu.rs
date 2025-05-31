@@ -1,12 +1,33 @@
 use wgpu::{
-    util::{BufferInitDescriptor, DeviceExt}, wgt::DeviceDescriptor, Adapter, Buffer, Device, Instance, InstanceDescriptor, Queue, RequestAdapterOptions
+    Adapter, Device, Instance, InstanceDescriptor, Queue, RequestAdapterOptions,
+    wgt::DeviceDescriptor,
 };
-
-
 
 // [NOTE] https://www.reddit.com/r/opengl/comments/v5w80e/instancing_how_to_account_for_new_data_after/
 
-pub type Pixels = u16;
+pub type Pixels = f32;
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Color {
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+}
+impl Color {
+    pub const WHITE: Self = Color {
+        r: 1.,
+        g: 1.,
+        b: 1.,
+        a: 1.,
+    };
+    pub const BLUE: Self = Color {
+        r: 0.,
+        g: 0.,
+        b: 1.,
+        a: 1.,
+    };
+}
 
 pub struct GPU {
     pub instance: Instance,
@@ -32,35 +53,5 @@ impl GPU {
             device,
             queue,
         }
-    }
-}
-
-fn _modify_buffer<T: bytemuck::Pod + Send + Sync>(buffer: Buffer, mut data: Vec<T>) {
-    let capturable = buffer.clone();
-    buffer.map_async(wgpu::MapMode::Write, .., move |result| {
-        if result.is_err() {
-            return;
-        }
-        let mut view = capturable.get_mapped_range_mut(..);
-        let buffer_gpu: &mut [T] = bytemuck::cast_slice_mut(&mut view);
-        buffer_gpu.swap_with_slice(&mut data);
-        drop(view);
-        capturable.unmap();
-    });
-}
-fn _replace_buffer<T: bytemuck::Pod + Send + Sync>(buffer: Buffer, data: Vec<T>, device: &Device) {
-    let usage = buffer.usage();
-    buffer.destroy();
-    device.create_buffer_init(&BufferInitDescriptor {
-        label: None,
-        contents: bytemuck::cast_slice(&data),
-        usage,
-    });
-}
-pub fn update_buffer<T: bytemuck::Pod + Send + Sync>(buffer: Buffer, data: Vec<T>, device: &Device) {
-    if buffer.size() / size_of::<T>() as u64 == data.len() as u64 {
-        _modify_buffer(buffer, data);
-    } else {
-        _replace_buffer(buffer, data, device);
     }
 }

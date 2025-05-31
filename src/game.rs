@@ -1,19 +1,18 @@
 use std::{
     ops::DerefMut,
-    sync::{Arc, atomic::AtomicBool, mpsc::Sender},
+    sync::{Arc, mpsc::Sender},
     thread,
     time::Instant,
 };
 
-use cgmath::SquareMatrix;
+use glam::Vec2;
 use parking_lot::{Mutex, RwLock};
 use winit::{event_loop::EventLoopProxy, window::WindowAttributes};
 
-use crate::app::{UserEvent, input::Input, window::Windows};
-use crate::render::{
-    _2d::{Draw2D, Mesh2D, Vertex2D},
-    RenderBuffer,
-};
+use crate::{app::{input::Input, window::Windows, UserEvent}, render::{_2d::Instance2D, gpu::Color, RenderCommand}};
+use crate::render::
+    _2d::{Mesh2D, Vertex2D}
+;
 use crate::sys::{UIDs, delete::DeleteQueue};
 
 use self::gui::Layout;
@@ -29,9 +28,8 @@ pub fn game(
     event_proxy: EventLoopProxy<UserEvent>,
     windows: Arc<RwLock<Windows>>,
     input: Arc<Mutex<Input>>,
-    draw: Arc<Mutex<RenderBuffer>>,
-    quit: Arc<AtomicBool>,
-    parker: Sender<()>,
+    render: Sender<RenderCommand>,
+    parker: &Sender<()>,
 ) {
     // [CORE] Initialize UID System
     let mut uids = UIDs::new();
@@ -40,39 +38,45 @@ pub fn game(
     let mut delete = DeleteQueue::default();
 
     // [VITAL] Initialize Draw Buffer
-    let mut draw2d = Draw2D::default();
     let quad = uids.add();
     {
         let quad_mesh = Mesh2D {
             vertex: vec![
                 Vertex2D {
                     // Top Left
-                    position: [-0.5, 0.5],
-                    color: [1., 1., 1.],
-                    uv: [0., 0.],
+                    position: Vec2 { x: -0.5, y: 0.5 },
+                    color: Color::WHITE,
+                    uv: Vec2::ZERO,
                 },
                 Vertex2D {
                     // Top Right
-                    position: [0.5, 0.5],
-                    color: [1., 1., 1.],
-                    uv: [1., 0.],
+                    position: Vec2 { x: -0.5, y: -0.5 },
+                    color: Color::WHITE,
+                    uv: Vec2::X,
                 },
                 Vertex2D {
                     // Bottom Left
-                    position: [-0.5, -0.5],
-                    color: [1., 1., 1.],
-                    uv: [0., 1.],
+                    position: Vec2 { x: 0.5, y: 0.5 },
+                    color: Color::WHITE,
+                    uv: Vec2::Y,
                 },
                 Vertex2D {
                     // Bottom Right
-                    position: [0.5, -0.5],
-                    color: [1., 1., 1.],
-                    uv: [1., 1.],
+                    position: Vec2 { x: 0.5, y: -0.5 },
+                    color: Color::WHITE,
+                    uv: Vec2::ONE,
                 },
             ],
             index: vec![0, 1, 2, 2, 1, 3],
         };
-        draw2d.add_mesh(quad, quad_mesh);
+        // draw2d.set_mesh(quad, quad_mesh);
+    }
+    let instance = uids.add();
+    {
+        // draw2d.set_instances(instance, vec![Instance2D {
+        //     tf: Default::default(),
+        //     color: Color::BLUE,
+        // }]);
     }
 
     // [USEFUL] Initialize UI Systems
@@ -85,7 +89,7 @@ pub fn game(
     // [EXAMPLE] Init Root
     let root = uids.add();
     tree.insert(root, None);
-    space.insert(root, Matrix2D::identity());
+    space.insert(root, Matrix2D::IDENTITY);
     {
         let mut windows = windows.write();
         if windows
@@ -108,10 +112,6 @@ pub fn game(
         // [VITAL] Time Frame
         let start = Instant::now();
         let delta = last_start.elapsed();
-
-        if quit.load(std::sync::atomic::Ordering::Relaxed) {
-            break 'game;
-        }
 
         // ========================================================
         // PRE-FRAME
@@ -160,10 +160,12 @@ pub fn game(
             layout.run();
         }
 
-        {
-            let mut draw = draw.lock();
-            (draw.updates._2d, draw.commands._2d) = draw2d.finish();
-        }
+        // draw2d.draw(&root, quad, instance);
+
+        // {
+        //     let mut draw = draw.lock();
+        //     (draw.updates._2d, draw.commands._2d) = draw2d.finish();
+        // }
 
         // ========================================================
         // END OF FRAME
@@ -177,5 +179,4 @@ pub fn game(
         // [VITAL] Wait for Next Frame
         thread::park();
     }
-    let _ = parker.send(());
 }

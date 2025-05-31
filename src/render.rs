@@ -12,39 +12,27 @@
 //! [https://sotrh.github.io/learn-wgpu/].
 
 use std::{
-    collections::HashMap,
     hint::black_box,
-    sync::{Arc, atomic::AtomicBool, mpsc::Sender},
+    sync::{
+        Arc,
+        mpsc::{Receiver, Sender},
+    },
     thread,
 };
 
-use parking_lot::{Mutex, RwLock};
-use wgpu::{Color, Surface, SurfaceConfiguration};
+use _2d::Render2D;
+use wgpu::{
+    Buffer, Color, RenderPipeline, Surface, SurfaceConfiguration, SurfaceTexture,
+    util::{BufferInitDescriptor, DeviceExt},
+};
+use winit::window::Window;
 
-use crate::{app::window::Windows, sys::Components};
+use crate::sys::{Components, UID};
 
-use self::_2d::{Commands2D, Render2D, Updates2D};
 use self::gpu::GPU;
 
 pub mod _2d;
 pub mod gpu;
-
-#[derive(Debug, Default)]
-pub struct Updates {
-    pub _2d: Updates2D,
-}
-
-#[derive(Debug, Default)]
-pub struct Commands {
-    pub clear: Color,
-    pub _2d: Components<Commands2D>,
-}
-
-#[derive(Debug, Default)]
-pub struct RenderBuffer {
-    pub updates: Updates,
-    pub commands: Commands,
-}
 
 // The only guarenteed color formats
 //
@@ -58,116 +46,174 @@ pub struct RenderBuffer {
 // pub const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
 pub const SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
 
-pub fn render(
-    windows: Arc<RwLock<Windows>>,
-    draw: Arc<Mutex<RenderBuffer>>,
-    exit: Arc<AtomicBool>,
-    parker: Sender<()>,
-) {
+pub enum RenderCommand {
+    // Update
+    Buffer(UID, Vec<u8>),
+    Delete(UID),
+    Window(Arc<Window>, UID),
+    // Draw
+    Pass(UID),
+    Pipeline(UID),
+    Vertex(u32, UID),
+    Index(UID),
+    Submit,
+
+    Quit,
+}
+
+pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
     let gpu = futures::executor::block_on(GPU::new());
-    // Cache previous window sizes to check if a reconfigure is needed.
-    let mut surface_sizes = HashMap::new();
+
     let mut surfaces: Components<Surface> = Default::default();
-    let mut render_2d = Render2D::new(&gpu);
+    let mut windows: Vec<Arc<Window>> = Default::default();
+    let mut buffers: Components<Buffer> = Default::default();
+    let mut pipelines: Components<RenderPipeline> = Default::default();
+
+    let pipeline_2d = Render2D::pipeline(&gpu);
 
     'render: loop {
-        if exit.load(std::sync::atomic::Ordering::Relaxed) {
-            break 'render;
-        }
+        let mut command: RenderCommand;
+        let mut surface_textures: Components<SurfaceTexture> = Default::default();
 
-        // [VITAL] Take Draw Commands
-        let mut draw = std::mem::take(&mut *draw.lock());
+        loop {
+            command = commands.recv().unwrap();
 
-        // [VITAL] Update Buffers
-        render_2d.update(draw.updates._2d, &gpu);
-
-        // Keep surfaces alive to prevent surface drop.
-        let windows = windows.read().windows.clone();
-
-        // Collect surfaces for rendering.
-        let surface_textures =
-            Components::from_iter(windows.iter().map(|(uid, window)| {
-                // Create surface for new windows.
-                if !surfaces.contains_key(uid) {
-                    surfaces.insert(*uid, gpu.instance.create_surface(window.clone()).unwrap());
+            match command {
+                RenderCommand::Buffer(uid, data) => {
+                    let Some(buffer) = buffers.get(&uid) else {
+                        continue 'render;
+                    };
+                    if buffer.size() == data.len() as u64 {
+                        let capture = buffer.clone();
+                        buffer.map_async(wgpu::MapMode::Write, .., move |result| {
+                            if result.is_err() {
+                                return;
+                            }
+                            let mut view = capture.get_mapped_range_mut(..);
+                            view.copy_from_slice(&data);
+                            drop(view);
+                            capture.unmap();
+                        });
+                    } else {
+                        let usage = buffer.usage();
+                        buffer.destroy();
+                        gpu.device.create_buffer_init(&BufferInitDescriptor {
+                            label: None,
+                            contents: bytemuck::cast_slice(&data),
+                            usage,
+                        });
+                    }
                 }
-                let surface = surfaces.get(uid).unwrap();
+                RenderCommand::Delete(uid) => {
+                    surfaces.remove(&uid);
+                    buffers.remove(&uid).map(|buffer| buffer.destroy());
+                    pipelines.remove(&uid);
+                }
 
-                let window_size = window.inner_size();
-                if surface_sizes
-                    .get(uid)
-                    .is_none_or(|surface_size| *surface_size != window_size)
-                {
+                RenderCommand::Window(window, uid) => {
+                    // Create surface for new windows.
+                    if !surfaces.contains_key(&uid) {
+                        surfaces.insert(uid, gpu.instance.create_surface(window.clone()).unwrap());
+                    }
+                    let surface = surfaces.get(&uid).unwrap();
                     // [VITAL] Reconfigure Surface
                     // [NOTE] Also performs first time configuration.
                     // Unconfigured surfaces would throw errors.
+                    let size = window.inner_size();
                     let config = SurfaceConfiguration {
                         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                         format: SURFACE_FORMAT,
                         view_formats: vec![],
                         alpha_mode: wgpu::CompositeAlphaMode::Auto,
-                        width: window_size.width,
-                        height: window_size.height,
+                        width: size.width,
+                        height: size.height,
                         desired_maximum_frame_latency: 1,
                         present_mode: wgpu::PresentMode::Mailbox,
                     };
+                    // [BUG] When rapidly and repeatedly resizing
+                    // (far more than is realistic) the mutex that
+                    // configure uses becomes locked elsewhere and
+                    // this thread becomes unresponsive.
+                    //
+                    // This may also be happening in get_current_texture
+                    // since they both use the same mutex.
+                    //
+                    // This could also be in some other mutex within
+                    // WGPU since it uses a lot of mutexes.
                     surface.configure(&gpu.device, &config);
-                    surface_sizes.insert(*uid, window_size);
+                    windows.push(window);
+                    surface_textures.insert(uid, surface.get_current_texture().unwrap());
                 }
-                (*uid, surface.get_current_texture().unwrap())
-            }));
+                _ => break,
+            }
+        }
 
-        // Create GPU command encoder.
         let mut encoder = gpu.device.create_command_encoder(&Default::default());
 
-        for (uid, surface_texture) in surface_textures.iter() {
+        loop {
+            let mut pass = match command {
+                RenderCommand::Pass(uid) => {
+                    let view = surface_textures.get(&uid).unwrap().texture.create_view(
+                        &wgpu::TextureViewDescriptor {
+                            format: Some(SURFACE_FORMAT),
+                            ..Default::default()
+                        },
+                    );
 
-            // [VITAL] Set-Up Surface Target
-            let texture_view = surface_texture
-                .texture
-                .create_view(&wgpu::TextureViewDescriptor {
-                    format: Some(SURFACE_FORMAT),
-                    ..Default::default()
-                });
-
-            // [VITAL] Begin Render Pass
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &texture_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        // [USEFUL] Clear Surface
-                        load: wgpu::LoadOp::Clear(draw.commands.clear),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-
-            // [USEFUL] 2D Rendering
-            if let Some(commands) = draw.commands._2d.remove(uid) {
-                render_2d.render(&mut render_pass, commands);
+                    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: None,
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                // [USEFUL] Clear Surface
+                                load: wgpu::LoadOp::Clear(Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    })
+                }
+                _ => break,
             };
+
+            loop {
+                match command {
+                    RenderCommand::Pipeline(uid) => pass.set_pipeline(pipelines.get(&uid).unwrap()),
+                    RenderCommand::Vertex(slot, uid) => {
+                        pass.set_vertex_buffer(slot, buffers.get(&uid).unwrap().slice(..))
+                    }
+                    RenderCommand::Index(uid) => pass.set_index_buffer(
+                        buffers.get(&uid).unwrap().slice(..),
+                        wgpu::IndexFormat::Uint16,
+                    ),
+                    _ => break,
+                }
+            }
+
+            command = commands.recv().unwrap();
         }
 
-        // [VITAL] Prevent Compiler Over-Optimization
-        black_box(gpu.queue.submit([encoder.finish()]));
+        match command {
+            RenderCommand::Submit => {
+                black_box(gpu.queue.submit([encoder.finish()]));
 
-        // [VITAL] Show Surfaces
-        for (_, surface_texture) in surface_textures {
-            surface_texture.present();
+                for (_, surface_texture) in surface_textures.drain() {
+                    surface_texture.present();
+                }
+
+                black_box(windows.clear());
+
+                // [VITAL] Signal End of Frame
+                let _ = parker.send(());
+                // [VITAL] Wait for Next Frame
+                thread::park();
+            }
+            RenderCommand::Quit => break 'render,
+            _ => {}
         }
-
-        // [VITAL] Make Sure Comipler Keeps Windows Alive
-        black_box(drop(windows));
-
-        // [VITAL] Signal End of Frame
-        let _ = parker.send(());
-        // [VITAL] Wait for Next Frame
-        thread::park();
     }
     let _ = parker.send(());
 }

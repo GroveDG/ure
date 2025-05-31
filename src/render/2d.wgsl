@@ -2,16 +2,34 @@
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
+    @location(0) color: vec4<f32>,
+    @location(1) uv: vec2<f32>,
+};
+struct VertexInput {
+    @location(0) position: vec2<f32>,
+    @location(1) color: vec4<f32>,
+    @location(2) uv: vec2<f32>,
+};
+struct InstanceInput {
+    @location(3) row0: vec3<f32>,
+    @location(4) row1: vec3<f32>,
+    @location(5) row2: vec3<f32>,
+    @location(6) color: vec4<f32>,
 };
 
 @vertex
 fn vertex(
-    @builtin(vertex_index) in_vertex_index: u32,
+    vertex: VertexInput,
+    instance: InstanceInput,
 ) -> VertexOutput {
     var out: VertexOutput;
-    let x = f32(1 - i32(in_vertex_index)) * 0.5;
-    let y = f32(i32(in_vertex_index & 1u) * 2 - 1) * 0.5;
-    out.clip_position = vec4<f32>(x, y, 0.0, 1.0);
+    let transform = mat3x3<f32> (
+        instance.row0,
+        instance.row1,
+        instance.row2,
+    );
+    out.clip_position = vec4<f32>(vertex.position.x, vertex.position.y, 0., 1.0);
+    out.color = vertex.color * instance.color;
     return out;
 }
 
@@ -19,6 +37,6 @@ fn vertex(
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4<f32>(0.3, 0.2, 0.1, 1.0);
+    return in.color;
 }
 

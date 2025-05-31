@@ -1,6 +1,6 @@
-use cgmath::Matrix3;
+use glam::Mat4;
 
-use super::{Space, P};
+use super::Space;
 
-pub type Matrix3D = Matrix4<P>;
+pub type Matrix3D = Mat4;
 pub type Space3D = Space<Matrix3D>;

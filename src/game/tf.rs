@@ -1,5 +1,3 @@
-use cgmath::SquareMatrix;
-
 use crate::sys::{Components, UID, delete::Delete};
 
 
@@ -7,22 +5,22 @@ use crate::sys::{Components, UID, delete::Delete};
 pub type Precision = f32;
 
 #[derive(Debug, Clone)]
-pub struct Space<M: SquareMatrix<Scalar = Precision>> {
+pub struct Space<M> {
     transforms: Components<M>,
 }
-impl<M: SquareMatrix<Scalar = Precision>> Default for Space<M> {
+impl<M> Default for Space<M> {
     fn default() -> Self {
         Self {
             transforms: Default::default(),
         }
     }
 }
-impl<M: SquareMatrix<Scalar = Precision>> Space<M> {
+impl<M> Space<M> {
     pub fn insert(&mut self, uid: UID, matrix: M) {
         self.transforms.insert(uid, matrix);
     }
 }
-impl<M: SquareMatrix<Scalar = Precision>> Delete for Space<M> {
+impl<M> Delete for Space<M> {
     fn delete(&mut self, uid: &UID) {
         self.transforms.remove(uid);
     }

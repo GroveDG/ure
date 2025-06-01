@@ -58,6 +58,7 @@ fn main() {
             .spawn(move || {
                 render::render(render_recv, &parker);
                 let _ = parker.send(());
+                println!("RENDER THREAD QUIT");
             }).unwrap()
     };
 
@@ -73,6 +74,7 @@ fn main() {
             .spawn(move || {
                 game::game(event_proxy, windows, input, render_sndr, &parker);
                 let _ = parker.send(());
+                println!("GAME THREAD QUIT");
             }).unwrap()
     };
 
@@ -110,6 +112,8 @@ fn main() {
             }
         }
     }
+
+    println!("APP THREAD QUIT");
 
     let _ = timing.join();
 }

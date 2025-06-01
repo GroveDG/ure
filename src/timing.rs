@@ -26,21 +26,22 @@ pub fn timing(
         let start = Instant::now();
         for _ in 0..2 {
             let _ = frame.recv();
-        }
 
-        // If either thread quit...
-        if game.is_finished() {
-            game.join();
-            render_sndr.send(RenderCommand::Quit);
-            render.join();
-            // Request app thread quit.
-            let _ = event_proxy.send_event(UserEvent::Exit);
-            // Wait for wake up in main().
-            return;
+            // If game thread quit...
+            if game.is_finished() {
+                let _ = game.join();
+                // Request render thread quit.
+                let _ = render_sndr.send(RenderCommand::Quit);
+                let _ = render.join();
+                // Request app thread quit.
+                let _ = event_proxy.send_event(UserEvent::Exit);
+                return;
+            }
         }
 
         // Resume threads.
         game.thread().unpark();
+        render.thread().unpark();
 
         // Calculate Remaining Time in Frame
         let elapsed = start.elapsed();

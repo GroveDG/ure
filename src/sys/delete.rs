@@ -47,6 +47,9 @@ impl DeleteQueue {
     pub fn contains(&self, uid: &UID) -> bool {
         self.queue[0].contains(uid) || self.queue[1].contains(uid)
     }
+    pub fn iter(&self) -> impl Iterator<Item = &UID> {
+        self.queue[0].iter().chain(self.queue[1].iter())
+    }
 }
 
 pub trait Delete {

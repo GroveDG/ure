@@ -1,9 +1,19 @@
+use std::sync::mpsc::Sender;
+
 use glam::Vec2;
-use wgpu::{FilterMode, FragmentState, MultisampleState, PipelineCompilationOptions, RenderPipeline, RenderPipelineDescriptor, VertexAttribute, VertexBufferLayout, VertexState};
+use wgpu::{
+    BufferUsages, FilterMode, FragmentState, MultisampleState, PipelineCompilationOptions, RenderPipeline, RenderPipelineDescriptor, VertexAttribute, VertexBufferLayout, VertexState
+};
 
-use crate::game::tf::Matrix2D;
+use crate::{
+    game::tf::Matrix2D,
+    sys::{Components, UID, UIDs, delete::Delete},
+};
 
-use super::{gpu::{Color, GPU}, SURFACE_FORMAT};
+use super::{
+    RenderCommand, SURFACE_FORMAT,
+    gpu::{Color, GPU},
+};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, PartialEq)]
@@ -21,7 +31,7 @@ impl Vertex2D {
         // UV
         2 => Float32x2,
     ];
-    const DESCRIPTOR: VertexBufferLayout<'static> = VertexBufferLayout {
+    const LAYOUT: VertexBufferLayout<'static> = VertexBufferLayout {
         array_stride: std::mem::size_of::<Self>() as u64,
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: Self::ATTRIBUTES,
@@ -62,10 +72,11 @@ impl Instance2D {
     };
 }
 
-pub struct Render2D {
-    
+pub struct Draw2D {
+    render_sndr: Sender<RenderCommand>,
+    meshes: Components<(UID, UID)>,
 }
-impl Render2D {
+impl Draw2D {
     pub fn pipeline(gpu: &GPU) -> RenderPipeline {
         let shader = gpu
             .device
@@ -87,7 +98,7 @@ impl Render2D {
                     module: &shader,
                     entry_point: Some("vertex"),
                     compilation_options: PipelineCompilationOptions::default(),
-                    buffers: &[Vertex2D::DESCRIPTOR, Instance2D::DESCRIPTOR],
+                    buffers: &[Vertex2D::LAYOUT, Instance2D::DESCRIPTOR],
                 },
                 fragment: Some(FragmentState {
                     module: &shader,
@@ -118,71 +129,70 @@ impl Render2D {
                 cache: None,
             })
     }
-    // pub fn update(&mut self, commands: Updates2D, gpu: &GPU) {
-    //     for (uid, mesh) in commands.meshes {
-    //         let Some(mesh) = mesh else {
-    //             self.meshes.remove(&uid);
-    //             continue;
-    //         };
-    //         if let Some(mesh_gpu) = self.meshes.get(&uid) {
-    //             update_buffer(mesh_gpu.vertex.clone(), mesh.vertex, &gpu.device);
-    //             update_buffer(mesh_gpu.index.clone(), mesh.index, &gpu.device);
-    //         } else {
-    //             let mesh = {
-    //                 Mesh2DGPU {
-    //                     vertex: gpu.device.create_buffer_init(&BufferInitDescriptor {
-    //                         label: None,
-    //                         contents: bytemuck::cast_slice(&mesh.vertex),
-    //                         usage: BufferUsages::VERTEX,
-    //                     }),
-    //                     index: gpu.device.create_buffer_init(&BufferInitDescriptor {
-    //                         label: None,
-    //                         contents: bytemuck::cast_slice(&mesh.index),
-    //                         usage: BufferUsages::INDEX,
-    //                     }),
-    //                 }
-    //             };
-    //             self.meshes.insert(uid, mesh);
-    //         }
-    //     }
-    //     for (uid, instances) in commands.instances {
-    //         let Some(instances) = instances else {
-    //             self.instances.remove(&uid);
-    //             continue;
-    //         };
-    //         if let Some(instances_gpu) = self.instances.get(&uid) {
-    //             update_buffer(instances_gpu.buffer.clone(), instances, &gpu.device);
-    //         } else {
-    //             let instances = {
-    //                 Instances2DGPU {
-    //                     buffer: gpu.device.create_buffer_init(&BufferInitDescriptor {
-    //                         label: None,
-    //                         contents: bytemuck::cast_slice(&instances),
-    //                         usage: BufferUsages::VERTEX,
-    //                     }),
-    //                 }
-    //             };
-    //             self.instances.insert(uid, instances);
-    //         }
-    //     }
-    // }
-    // pub fn render(&mut self, render_pass: &mut RenderPass, commands: Commands2D) {
-    //     render_pass.set_pipeline(&self.pipeline);
-    //     for (mesh, instance) in commands.iter() {
-    //         let Some(mesh) = self.meshes.get(mesh) else {
-    //             continue;
-    //         };
-    //         let Some(instances) = self.instances.get(instance) else {
-    //             continue;
-    //         };
-    //         render_pass.set_vertex_buffer(0, mesh.vertex.slice(..));
-    //         render_pass.set_vertex_buffer(1, instances.buffer.slice(..));
-    //         render_pass.set_index_buffer(mesh.index.slice(..), wgpu::IndexFormat::Uint16);
-    //         render_pass.draw_indexed(
-    //             0..mesh.index.size() as u32 / 2,
-    //             0,
-    //             0..instances.len() as u32,
-    //         );
-    //     }
-    // }
+    pub fn new(render_sndr: Sender<RenderCommand>) -> Self {
+        Self {
+            render_sndr,
+            meshes: Default::default(),
+        }
+    }
+    pub fn update_mesh(&mut self, uid: UID, uids: &mut UIDs, mesh: Mesh2D) {
+        if !self.meshes.contains_key(&uid) {
+            let vertex = uids.add();
+            let index = uids.add();
+
+            self.meshes.insert(uid, (vertex, index));
+        }
+
+        let (vertex, index) = self.meshes.get(&uid).copied().unwrap();
+
+        let _ = self.render_sndr.send(RenderCommand::Buffer(
+            vertex,
+            bytemuck::cast_slice(&mesh.vertex).to_vec(),
+            BufferUsages::VERTEX,
+        ));
+        let _ = self.render_sndr.send(RenderCommand::Buffer(
+            index,
+            bytemuck::cast_slice(&mesh.index).to_vec(),
+            BufferUsages::INDEX,
+        ));
+    }
+    pub fn update_instances(&self, uid: UID, instances: Vec<Instance2D>) {
+        let _ = self.render_sndr.send(RenderCommand::Buffer(
+            uid,
+            bytemuck::cast_slice(&instances).to_vec(),
+            BufferUsages::VERTEX,
+        ));
+    }
+    pub fn start(&self) {
+        let _ = self
+            .render_sndr
+            .send(RenderCommand::Pipeline(super::Pipelines::_2D));
+    }
+    pub fn mesh(&self, uid: &UID) {
+        let (vertex, index) = self.meshes.get(uid).copied().unwrap();
+        let _ = self
+            .render_sndr
+            .send(RenderCommand::Vertex(0, vertex, None));
+        let _ = self.render_sndr.send(RenderCommand::Index(index));
+    }
+    pub fn instances(&self, uid: UID) {
+        let _ = self.render_sndr.send(RenderCommand::Vertex(
+            1,
+            uid,
+            Some(size_of::<Instance2D>() as u64),
+        ));
+    }
+    pub fn draw(&self) {
+        let _ = self.render_sndr.send(RenderCommand::Draw);
+    }
+}
+
+impl Delete for Draw2D {
+    fn delete(&mut self, uid: &UID) {
+        let Some((vertex, index)) = self.meshes.get(uid).copied() else {
+            return;
+        };
+        let _ = self.render_sndr.send(RenderCommand::Delete(vertex));
+        let _ = self.render_sndr.send(RenderCommand::Delete(index));
+    }
 }

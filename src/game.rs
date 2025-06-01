@@ -9,7 +9,7 @@ use glam::Vec2;
 use parking_lot::{Mutex, RwLock};
 use winit::{event_loop::EventLoopProxy, window::WindowAttributes};
 
-use crate::{app::{input::Input, window::Windows, UserEvent}, render::{_2d::Instance2D, gpu::Color, RenderCommand}};
+use crate::{app::{input::Input, window::Windows, UserEvent}, render::{_2d::{Draw2D, Instance2D}, gpu::Color, RenderCommand}};
 use crate::render::
     _2d::{Mesh2D, Vertex2D}
 ;
@@ -36,6 +36,8 @@ pub fn game(
 
     // [VITAL] Initialize Delete System
     let mut delete = DeleteQueue::default();
+
+    let mut draw_2d = Draw2D::new(render.clone());
 
     // [VITAL] Initialize Draw Buffer
     let quad = uids.add();
@@ -69,14 +71,14 @@ pub fn game(
             ],
             index: vec![0, 1, 2, 2, 1, 3],
         };
-        // draw2d.set_mesh(quad, quad_mesh);
+        draw_2d.update_mesh(quad, &mut uids, quad_mesh);
     }
     let instance = uids.add();
     {
-        // draw2d.set_instances(instance, vec![Instance2D {
-        //     tf: Default::default(),
-        //     color: Color::BLUE,
-        // }]);
+        draw_2d.update_instances(instance, vec![Instance2D {
+            tf: Default::default(),
+            color: Color::WHITE,
+        }]);
     }
 
     // [USEFUL] Initialize UI Systems
@@ -132,8 +134,11 @@ pub fn game(
 
         // [USEFUL] Prevent write lock when no deletes are needed.
         let needs_delete = {
-            let windows = windows.read();
-            windows.windows.keys().any(|uid| delete.contains(uid))
+            let mut needs_delete = false;
+            for (uid, window) in windows.read().windows.iter() {
+                needs_delete |= delete.contains(uid);
+            }
+            needs_delete
         };
         // [USEFUL] Delete Window on Close
         if needs_delete || !input_state.close.is_empty() {
@@ -143,6 +148,10 @@ pub fn game(
                 delete.delete(windows.deref_mut(), window);
             }
         }
+        for uid in delete.iter().copied() {
+            let _ = render.send(RenderCommand::Delete(uid));
+        }
+        delete.apply(&mut draw_2d);
 
         // [USEFUL] Exit if No Windows
         {
@@ -153,19 +162,26 @@ pub fn game(
             }
         }
 
+        for (uid, window) in windows.read().windows.iter() {
+            let _ = render.send(RenderCommand::Window(window.clone(), *uid));
+        }
+
         // [USEFUL] GUI Layout
         #[cfg(feature = "GUI")]
         {
             delete.apply(&mut layout);
             layout.run();
         }
+        
+        let _ = render.send(RenderCommand::Pass(root));
+        draw_2d.start();
+        draw_2d.mesh(&quad);
+        draw_2d.instances(instance);
+        draw_2d.draw();
 
-        // draw2d.draw(&root, quad, instance);
-
-        // {
-        //     let mut draw = draw.lock();
-        //     (draw.updates._2d, draw.commands._2d) = draw2d.finish();
-        // }
+        if render.send(RenderCommand::Submit).is_err() {
+            break 'game;
+        }
 
         // ========================================================
         // END OF FRAME

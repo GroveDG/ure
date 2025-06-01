@@ -7,6 +7,7 @@ use std::{
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD as B64};
 use bimap::BiHashMap;
 use rand::{RngCore, rngs::ThreadRng};
+use rustc_hash::FxBuildHasher;
 use serde::{Deserialize, Serialize, de::Visitor};
 
 use self::delete::Delete;
@@ -16,8 +17,8 @@ pub mod delete;
 
 
 pub type Entities = HashSet<UID>;
-pub type Components<C> = HashMap<UID, C>;
-pub type BiComponents<C> = BiHashMap<UID, C>;
+pub type Components<C> = HashMap<UID, C, FxBuildHasher>;
+pub type BiComponents<C> = BiHashMap<UID, C, FxBuildHasher, FxBuildHasher>;
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub struct UID(u64);

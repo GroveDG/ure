@@ -13,6 +13,7 @@
 
 use std::{
     hint::black_box,
+    ops::Range,
     sync::{
         Arc,
         mpsc::{Receiver, Sender},
@@ -20,9 +21,9 @@ use std::{
     thread,
 };
 
-use _2d::Render2D;
+use _2d::Draw2D;
 use wgpu::{
-    Buffer, Color, RenderPipeline, Surface, SurfaceConfiguration, SurfaceTexture,
+    Buffer, BufferUsages, Color, RenderPipeline, Surface, SurfaceConfiguration, SurfaceTexture,
     util::{BufferInitDescriptor, DeviceExt},
 };
 use winit::window::Window;
@@ -46,30 +47,35 @@ pub mod gpu;
 // pub const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
 pub const SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
 
+#[derive(Debug)]
 pub enum RenderCommand {
     // Update
-    Buffer(UID, Vec<u8>),
+    Buffer(UID, Vec<u8>, BufferUsages),
     Delete(UID),
     Window(Arc<Window>, UID),
     // Draw
     Pass(UID),
-    Pipeline(UID),
-    Vertex(u32, UID),
+    Pipeline(Pipelines),
+    Vertex(u32, UID, Option<u64>),
     Index(UID),
+    Draw,
     Submit,
 
     Quit,
 }
 
+#[derive(Debug)]
+#[repr(usize)]
+pub enum Pipelines {
+    _2D = 0,
+}
+
 pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
     let gpu = futures::executor::block_on(GPU::new());
 
-    let mut surfaces: Components<Surface> = Default::default();
-    let mut windows: Vec<Arc<Window>> = Default::default();
+    let mut surfaces: Components<(Surface, Arc<Window>)> = Default::default();
     let mut buffers: Components<Buffer> = Default::default();
-    let mut pipelines: Components<RenderPipeline> = Default::default();
-
-    let pipeline_2d = Render2D::pipeline(&gpu);
+    let pipelines: Vec<RenderPipeline> = vec![Draw2D::pipeline(&gpu)];
 
     'render: loop {
         let mut command: RenderCommand;
@@ -79,47 +85,57 @@ pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
             command = commands.recv().unwrap();
 
             match command {
-                RenderCommand::Buffer(uid, data) => {
-                    let Some(buffer) = buffers.get(&uid) else {
-                        continue 'render;
-                    };
-                    if buffer.size() == data.len() as u64 {
-                        let capture = buffer.clone();
-                        buffer.map_async(wgpu::MapMode::Write, .., move |result| {
-                            if result.is_err() {
-                                return;
-                            }
-                            let mut view = capture.get_mapped_range_mut(..);
-                            view.copy_from_slice(&data);
-                            drop(view);
-                            capture.unmap();
-                        });
-                    } else {
-                        let usage = buffer.usage();
-                        buffer.destroy();
+                RenderCommand::Buffer(uid, data, usage) => {
+                    let buffer = buffers.insert(
+                        uid,
                         gpu.device.create_buffer_init(&BufferInitDescriptor {
                             label: None,
                             contents: bytemuck::cast_slice(&data),
-                            usage,
-                        });
+                            usage: usage,
+                        }),
+                    );
+                    if let Some(buffer) = buffer {
+                        if buffer.size() == data.len() as u64 {
+                            let capture = buffer.clone();
+                            buffer.map_async(wgpu::MapMode::Write, .., move |result| {
+                                if result.is_err() {
+                                    return;
+                                }
+                                let mut view = capture.get_mapped_range_mut(..);
+                                view.copy_from_slice(&data);
+                                drop(view);
+                                capture.unmap();
+                            });
+                        } else {
+                            buffer.destroy();
+                        }
                     }
                 }
                 RenderCommand::Delete(uid) => {
-                    surfaces.remove(&uid);
+                    if let Some((surface, window)) = surfaces.remove(&uid) {
+                        // Specify drop order specifically so
+                        // Surface doesn't exist without window.
+                        // IDK if this is actually important,
+                        // but WGPU is picky about when you
+                        // close the window.
+                        drop(surface);
+                        drop(window);
+                    }
                     buffers.remove(&uid).map(|buffer| buffer.destroy());
-                    pipelines.remove(&uid);
                 }
-
                 RenderCommand::Window(window, uid) => {
+                    let size = window.inner_size();
                     // Create surface for new windows.
                     if !surfaces.contains_key(&uid) {
-                        surfaces.insert(uid, gpu.instance.create_surface(window.clone()).unwrap());
+                        surfaces.insert(
+                            uid,
+                            (gpu.instance.create_surface(window.clone()).unwrap(), window),
+                        );
                     }
-                    let surface = surfaces.get(&uid).unwrap();
+                    let (surface, _) = surfaces.get(&uid).unwrap();
                     // [VITAL] Reconfigure Surface
                     // [NOTE] Also performs first time configuration.
                     // Unconfigured surfaces would throw errors.
-                    let size = window.inner_size();
                     let config = SurfaceConfiguration {
                         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                         format: SURFACE_FORMAT,
@@ -130,7 +146,7 @@ pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
                         desired_maximum_frame_latency: 1,
                         present_mode: wgpu::PresentMode::Mailbox,
                     };
-                    // [BUG] When rapidly and repeatedly resizing
+                    // [BUG] On X11, when rapidly and repeatedly resizing
                     // (far more than is realistic) the mutex that
                     // configure uses becomes locked elsewhere and
                     // this thread becomes unresponsive.
@@ -141,7 +157,6 @@ pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
                     // This could also be in some other mutex within
                     // WGPU since it uses a lot of mutexes.
                     surface.configure(&gpu.device, &config);
-                    windows.push(window);
                     surface_textures.insert(uid, surface.get_current_texture().unwrap());
                 }
                 _ => break,
@@ -150,50 +165,68 @@ pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
 
         let mut encoder = gpu.device.create_command_encoder(&Default::default());
 
-        loop {
-            let mut pass = match command {
-                RenderCommand::Pass(uid) => {
-                    let view = surface_textures.get(&uid).unwrap().texture.create_view(
-                        &wgpu::TextureViewDescriptor {
-                            format: Some(SURFACE_FORMAT),
-                            ..Default::default()
-                        },
-                    );
-
-                    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: None,
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: &view,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                // [USEFUL] Clear Surface
-                                load: wgpu::LoadOp::Clear(Color::BLACK),
-                                store: wgpu::StoreOp::Store,
-                            },
-                        })],
-                        depth_stencil_attachment: None,
-                        timestamp_writes: None,
-                        occlusion_query_set: None,
-                    })
+        'surfaces: loop {
+            let uid = loop {
+                match command {
+                    RenderCommand::Pass(uid) => break uid,
+                    RenderCommand::Quit | RenderCommand::Submit => break 'surfaces,
+                    _ => command = commands.recv().unwrap()
                 }
-                _ => break,
             };
+            
+            // If Window was not commanded, next surface.
+            let Some(surface_texture) = surface_textures.get(&uid) else {
+                command = commands.recv().unwrap();
+                continue 'surfaces;
+            };
+            let view = surface_texture
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor {
+                    format: Some(SURFACE_FORMAT),
+                    ..Default::default()
+                });
+
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        // [USEFUL] Clear Surface
+                        load: wgpu::LoadOp::Clear(Color::BLUE),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            // Dummy defaults to avoid an obnoxious Option
+            let mut indices: Range<u32> = 0..0;
+            let mut instances: Range<u32> = 0..0;
 
             loop {
+                command = commands.recv().unwrap();
+
                 match command {
-                    RenderCommand::Pipeline(uid) => pass.set_pipeline(pipelines.get(&uid).unwrap()),
-                    RenderCommand::Vertex(slot, uid) => {
-                        pass.set_vertex_buffer(slot, buffers.get(&uid).unwrap().slice(..))
+                    RenderCommand::Pipeline(i) => pass.set_pipeline(&pipelines[i as usize]),
+                    RenderCommand::Vertex(slot, uid, instance_size) => {
+                        let vertex = buffers.get(&uid).unwrap();
+                        if let Some(instance_size) = instance_size {
+                            instances = 0..(vertex.size() / instance_size) as u32
+                        }
+                        pass.set_vertex_buffer(slot, vertex.slice(..))
                     }
-                    RenderCommand::Index(uid) => pass.set_index_buffer(
-                        buffers.get(&uid).unwrap().slice(..),
-                        wgpu::IndexFormat::Uint16,
-                    ),
+                    RenderCommand::Index(uid) => {
+                        let index = buffers.get(&uid).unwrap();
+                        indices = 0..(index.size() / 2) as u32; // div by 2 because indices are u16
+                        pass.set_index_buffer(index.slice(..), wgpu::IndexFormat::Uint16)
+                    }
+                    RenderCommand::Draw => pass.draw_indexed(indices.clone(), 0, instances.clone()),
                     _ => break,
                 }
             }
-
-            command = commands.recv().unwrap();
         }
 
         match command {
@@ -204,8 +237,6 @@ pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
                     surface_texture.present();
                 }
 
-                black_box(windows.clear());
-
                 // [VITAL] Signal End of Frame
                 let _ = parker.send(());
                 // [VITAL] Wait for Next Frame
@@ -215,5 +246,4 @@ pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
             _ => {}
         }
     }
-    let _ = parker.send(());
 }

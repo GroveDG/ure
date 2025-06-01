@@ -1,14 +1,16 @@
-use std::sync::Arc;
+use std::sync::{Arc, mpsc::Sender};
 
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 use winit::{
-    application::ApplicationHandler, event::WindowEvent, event_loop::ActiveEventLoop,
-    window::WindowAttributes,
+    application::ApplicationHandler,
+    event::WindowEvent,
+    event_loop::ActiveEventLoop,
+    window::{Window, WindowAttributes, WindowId},
 };
 
-use crate::sys::UID;
+use crate::sys::{BiComponents, UID};
 
-use self::{input::Input, window::Windows};
+use self::input::Input;
 
 pub mod input;
 pub mod window;
@@ -21,7 +23,8 @@ pub enum UserEvent {
 }
 
 pub struct App {
-    pub windows: Arc<RwLock<Windows>>,
+    pub window_ids: BiComponents<WindowId>,
+    pub window_sndr: Sender<(UID, Window)>,
     pub input: Arc<Mutex<Input>>,
 }
 
@@ -37,8 +40,7 @@ impl ApplicationHandler<UserEvent> for App {
         match event {
             WindowEvent::CloseRequested => {
                 let mut input = self.input.lock();
-                let windows = self.windows.read();
-                let Some(uid) = windows.window_ids.get_by_right(&window_id) else {
+                let Some(uid) = self.window_ids.get_by_right(&window_id) else {
                     return;
                 };
                 input.close.insert(*uid);
@@ -50,12 +52,11 @@ impl ApplicationHandler<UserEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::NewWindow(uid, attr) => {
-                let mut windows = self.windows.write();
                 let window = event_loop
                     .create_window(attr)
                     .expect("Window creation failed. See winit::event_loop::ActiveEventLoop.");
-
-                windows.insert(uid, window.id(), window);
+                self.window_ids.insert(uid, window.id());
+                let _ = self.window_sndr.send((uid, window));
             }
             UserEvent::Exit => {
                 event_loop.exit();

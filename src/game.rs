@@ -1,19 +1,27 @@
 use std::{
     ops::DerefMut,
-    sync::{Arc, mpsc::Sender},
+    sync::{mpsc::{Receiver, Sender}, Arc},
     thread,
     time::Instant,
 };
 
 use glam::Vec2;
-use parking_lot::{Mutex, RwLock};
-use winit::{event_loop::EventLoopProxy, window::WindowAttributes};
+use parking_lot::Mutex;
+use winit::{
+    event_loop::EventLoopProxy,
+    window::{Window, WindowAttributes},
+};
 
-use crate::{app::{input::Input, window::Windows, UserEvent}, render::{_2d::{Draw2D, Instance2D}, gpu::Color, RenderCommand}};
-use crate::render::
-    _2d::{Mesh2D, Vertex2D}
-;
+use crate::{app::window::Windows, render::_2d::{Mesh2D, Vertex2D}, sys::UID};
 use crate::sys::{UIDs, delete::DeleteQueue};
+use crate::{
+    app::{UserEvent, input::Input},
+    render::{
+        _2d::{Draw2D, Instance2D},
+        RenderCommand,
+        gpu::Color,
+    },
+};
 
 use self::gui::Layout;
 use self::tf::{Matrix2D, Space2D};
@@ -26,7 +34,7 @@ pub mod tree;
 
 pub fn game(
     event_proxy: EventLoopProxy<UserEvent>,
-    windows: Arc<RwLock<Windows>>,
+    window_recv: Receiver<(UID, Window)>,
     input: Arc<Mutex<Input>>,
     render: Sender<RenderCommand>,
     parker: &Sender<()>,
@@ -37,6 +45,7 @@ pub fn game(
     // [VITAL] Initialize Delete System
     let mut delete = DeleteQueue::default();
 
+    let mut windows = Windows::new(event_proxy.clone(), window_recv);
     let mut draw_2d = Draw2D::new(render.clone());
 
     // [VITAL] Initialize Draw Buffer
@@ -75,10 +84,13 @@ pub fn game(
     }
     let instance = uids.add();
     {
-        draw_2d.update_instances(instance, vec![Instance2D {
-            tf: Default::default(),
-            color: Color::WHITE,
-        }]);
+        draw_2d.update_instances(
+            instance,
+            vec![Instance2D {
+                tf: Default::default(),
+                color: Color::WHITE,
+            }],
+        );
     }
 
     // [USEFUL] Initialize UI Systems
@@ -92,19 +104,11 @@ pub fn game(
     let root = uids.add();
     tree.insert(root, None);
     space.insert(root, Matrix2D::IDENTITY);
-    {
-        let mut windows = windows.write();
-        if windows
-            .request_new(
-                root,
-                WindowAttributes::default().with_title("Untitled Rust Engine"),
-                &event_proxy,
-            )
-            .is_err()
-        {
-            return;
-        }
-    }
+    let _ = windows.request_new(
+        root,
+        WindowAttributes::default().with_title("Untitled Rust Engine"),
+        &event_proxy,
+    );
 
     // [VITAL] Frame Timing
     let mut last_start = Instant::now(); // Last frame start
@@ -132,37 +136,26 @@ pub fn game(
         // GAME LOGIC
         // ========================================================
 
-        // [USEFUL] Prevent write lock when no deletes are needed.
-        let needs_delete = {
-            let mut needs_delete = false;
-            for (uid, window) in windows.read().windows.iter() {
-                needs_delete |= delete.contains(uid);
-            }
-            needs_delete
-        };
+        // [VITAL] Receive New Windows
+        windows.receive();
+
         // [USEFUL] Delete Window on Close
-        if needs_delete || !input_state.close.is_empty() {
-            let mut windows = windows.write();
-            delete.apply(windows.deref_mut());
-            for window in input_state.close {
-                delete.delete(windows.deref_mut(), window);
-            }
+        for uid in input_state.close {
+            delete.delete(&mut windows, uid);
         }
+        delete.apply(&mut windows);
+
         for uid in delete.iter().copied() {
             let _ = render.send(RenderCommand::Delete(uid));
         }
         delete.apply(&mut draw_2d);
 
-        // [USEFUL] Exit if No Windows
-        {
-            let windows = windows.read();
-            if windows.windows.is_empty() && windows.requested == 0 {
-                println!("Close");
-                break 'game;
-            }
+        // [USEFUL] Quit when all windows are closed.
+        if windows.is_empty() {
+            break 'game;
         }
 
-        for (uid, window) in windows.read().windows.iter() {
+        for (uid, window) in windows.windows.iter() {
             let _ = render.send(RenderCommand::Window(window.clone(), *uid));
         }
 
@@ -172,7 +165,7 @@ pub fn game(
             delete.apply(&mut layout);
             layout.run();
         }
-        
+
         let _ = render.send(RenderCommand::Pass(root));
         draw_2d.start();
         draw_2d.mesh(&quad);

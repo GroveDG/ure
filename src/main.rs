@@ -25,10 +25,10 @@ use std::{
     thread::{self},
 };
 
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 use winit::{error::EventLoopError, event_loop::EventLoop};
 
-use crate::app::{App, input::Input, window::Windows};
+use crate::app::{App, input::Input};
 
 mod app;
 mod game;
@@ -43,7 +43,7 @@ fn main() {
         .expect("EventLoop building failed. See winit::event_loop::EventLoopBuilder::build");
 
     // [VITAL] Initialize Shared Systems
-    let windows = Arc::new(RwLock::new(Windows::default()));
+    let (window_sndr, window_recv) = channel();
     let input = Arc::new(Mutex::new(Input::default()));
 
     // [VITAL] Initialize Thread Communication
@@ -59,42 +59,39 @@ fn main() {
                 render::render(render_recv, &parker);
                 let _ = parker.send(());
                 println!("RENDER THREAD QUIT");
-            }).unwrap()
+            })
+            .unwrap()
     };
 
     // [VITAL] Initialize Game Thread
     let game = {
         let event_proxy = event_loop.create_proxy();
         let input = Arc::clone(&input);
-        let windows = windows.clone();
         let render_sndr = render_sndr.clone();
-        
+
         thread::Builder::new()
             .name("game".to_string())
             .spawn(move || {
-                game::game(event_proxy, windows, input, render_sndr, &parker);
+                game::game(event_proxy, window_recv, input, render_sndr, &parker);
                 let _ = parker.send(());
                 println!("GAME THREAD QUIT");
-            }).unwrap()
+            })
+            .unwrap()
     };
 
     // [VITAL] Time Frames in Game and Render Threads
     let timing = {
         let event_proxy = event_loop.create_proxy();
 
-        thread::spawn(move || {
-            timing::timing(
-                parked,
-                game,
-                render,
-                render_sndr,
-                event_proxy,
-            )
-        })
+        thread::spawn(move || timing::timing(parked, game, render, render_sndr, event_proxy))
     };
 
     // [VITAL] Run App
-    let mut app = App { windows, input };
+    let mut app = App {
+        window_ids: Default::default(),
+        window_sndr,
+        input,
+    };
     if let Err(e) = event_loop.run_app(&mut app) {
         // [TRIVIAL] Expose Errors
         match e {

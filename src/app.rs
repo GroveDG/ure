@@ -1,6 +1,7 @@
-use std::sync::{Arc, mpsc::Sender};
+use std::{io::{self, Write}, sync::{mpsc::Sender, Arc}, time::{Duration, Instant}};
 
 use parking_lot::Mutex;
+use spin_sleep::sleep;
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -60,6 +61,7 @@ impl ApplicationHandler<UserEvent> for App {
             }
             UserEvent::Exit => {
                 event_loop.exit();
+                println!("EXITED {:?}", Instant::now());
                 return;
             }
         }

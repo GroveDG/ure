@@ -112,55 +112,46 @@ pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
                     }
                 }
                 RenderCommand::Delete(uid) => {
-                    if let Some((surface, window)) = surfaces.remove(&uid) {
-                        // Specify drop order specifically so
-                        // Surface doesn't exist without window.
-                        // IDK if this is actually important,
-                        // but WGPU is picky about when you
-                        // close the window.
-                        drop(surface);
-                        drop(window);
-                    }
-                    buffers.remove(&uid).map(|buffer| buffer.destroy());
+                    surfaces.remove(&uid);
+                    buffers.remove(&uid);
                 }
                 RenderCommand::Window(window, uid) => {
-                    let size = window.inner_size();
-                    // Create surface for new windows.
-                    if !surfaces.contains_key(&uid) {
-                        surfaces.insert(
-                            uid,
-                            (gpu.instance.create_surface(window.clone()).unwrap(), window),
-                        );
-                    }
-                    let (surface, _) = surfaces.get(&uid).unwrap();
-                    // [VITAL] Reconfigure Surface
-                    // [NOTE] Also performs first time configuration.
-                    // Unconfigured surfaces would throw errors.
-                    let config = SurfaceConfiguration {
-                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                        format: SURFACE_FORMAT,
-                        view_formats: vec![],
-                        alpha_mode: wgpu::CompositeAlphaMode::Auto,
-                        width: size.width,
-                        height: size.height,
-                        desired_maximum_frame_latency: 1,
-                        present_mode: wgpu::PresentMode::Mailbox,
-                    };
-                    // [BUG] On X11, when rapidly and repeatedly resizing
-                    // (far more than is realistic) the mutex that
-                    // configure uses becomes locked elsewhere and
-                    // this thread becomes unresponsive.
-                    //
-                    // This may also be happening in get_current_texture
-                    // since they both use the same mutex.
-                    //
-                    // This could also be in some other mutex within
-                    // WGPU since it uses a lot of mutexes.
-                    surface.configure(&gpu.device, &config);
-                    surface_textures.insert(uid, surface.get_current_texture().unwrap());
+                    surfaces.insert(
+                        uid,
+                        (gpu.instance.create_surface(window.clone()).unwrap(), window),
+                    );
                 }
                 _ => break,
             }
+        }
+
+        for (uid, (surface, window)) in surfaces.iter() {
+            let size = window.inner_size();
+            // [VITAL] Reconfigure Surface
+            // [NOTE] Also performs first time configuration.
+            // Unconfigured surfaces would throw errors.
+            let config = SurfaceConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                format: SURFACE_FORMAT,
+                view_formats: vec![],
+                alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                width: size.width,
+                height: size.height,
+                desired_maximum_frame_latency: 1,
+                present_mode: wgpu::PresentMode::Mailbox,
+            };
+            // [BUG] On X11, when rapidly and repeatedly resizing
+            // (far more than is realistic) the mutex that
+            // configure uses becomes locked elsewhere and
+            // this thread becomes unresponsive.
+            //
+            // This may also be happening in get_current_texture
+            // since they both use the same mutex.
+            //
+            // This could also be in some other mutex within
+            // WGPU since it uses a lot of mutexes.
+            surface.configure(&gpu.device, &config);
+            surface_textures.insert(*uid, surface.get_current_texture().unwrap());
         }
 
         let mut encoder = gpu.device.create_command_encoder(&Default::default());
@@ -170,10 +161,10 @@ pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
                 match command {
                     RenderCommand::Pass(uid) => break uid,
                     RenderCommand::Quit | RenderCommand::Submit => break 'surfaces,
-                    _ => command = commands.recv().unwrap()
+                    _ => command = commands.recv().unwrap(),
                 }
             };
-            
+
             // If Window was not commanded, next surface.
             let Some(surface_texture) = surface_textures.get(&uid) else {
                 command = commands.recv().unwrap();

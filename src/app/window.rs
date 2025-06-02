@@ -1,11 +1,11 @@
-use std::sync::{Arc, mpsc::Receiver};
+use std::sync::{mpsc::{Receiver, Sender}, Arc};
 
 use winit::{
     event_loop::{EventLoopClosed, EventLoopProxy},
     window::{Window, WindowAttributes},
 };
 
-use crate::sys::{Components, UID, delete::Delete};
+use crate::{render::RenderCommand, sys::{delete::Delete, Components, UID}};
 
 use super::UserEvent;
 
@@ -38,19 +38,20 @@ impl Windows {
     /// by [winit]. We must send an event to
     /// prompt winit to make a window. It will
     /// send the resulting window back.
-    pub fn request_new(
+    pub fn request(
         &mut self,
         uid: UID,
         attr: WindowAttributes,
-        event_proxy: &EventLoopProxy<UserEvent>,
     ) -> Result<(), EventLoopClosed<UserEvent>> {
         self.requested += 1;
-        event_proxy.send_event(UserEvent::NewWindow(uid, attr))
+        self.event_proxy.send_event(UserEvent::NewWindow(uid, attr))
     }
-    pub fn receive(&mut self) {
+    pub fn receive(&mut self, render_sndr: &Sender<RenderCommand>) {
         for (uid, window) in self.window_recv.try_iter() {
             self.requested -= 1;
-            self.windows.insert(uid, Arc::new(window));
+            let window = Arc::new(window);
+            self.windows.insert(uid, window.clone());
+            render_sndr.send(RenderCommand::Window(window, uid));
         }
     }
     pub fn is_empty(&self) -> bool {

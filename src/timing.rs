@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use spin_sleep::SpinSleeper;
+use spin_sleep::{sleep, SpinSleeper};
 use winit::event_loop::EventLoopProxy;
 
 use crate::{app::UserEvent, render::RenderCommand};
@@ -35,6 +35,7 @@ pub fn timing(
                 let _ = render.join();
                 // Request app thread quit.
                 let _ = event_proxy.send_event(UserEvent::Exit);
+                println!("EVENT SENT");
                 return;
             }
         }

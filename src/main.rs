@@ -21,11 +21,12 @@
 //! - __TODO__ Mark where work is needed.
 
 use std::{
-    sync::{Arc, mpsc::channel},
-    thread::{self},
+    sync::{mpsc::channel, Arc},
+    thread::{self}, time::{Duration, Instant},
 };
 
 use parking_lot::Mutex;
+use spin_sleep::sleep;
 use winit::{error::EventLoopError, event_loop::EventLoop};
 
 use crate::app::{App, input::Input};
@@ -58,7 +59,7 @@ fn main() {
             .spawn(move || {
                 render::render(render_recv, &parker);
                 let _ = parker.send(());
-                println!("RENDER THREAD QUIT");
+                println!("RENDER THREAD QUIT {:?}", Instant::now());
             })
             .unwrap()
     };
@@ -74,7 +75,7 @@ fn main() {
             .spawn(move || {
                 game::game(event_proxy, window_recv, input, render_sndr, &parker);
                 let _ = parker.send(());
-                println!("GAME THREAD QUIT");
+                println!("GAME THREAD QUIT {:?}", Instant::now());
             })
             .unwrap()
     };
@@ -110,7 +111,9 @@ fn main() {
         }
     }
 
-    println!("APP THREAD QUIT");
+    println!("APP THREAD QUIT {:?}", Instant::now());
 
     let _ = timing.join();
+
+    println!("TIMING THREAD JOIN {:?}", Instant::now());
 }

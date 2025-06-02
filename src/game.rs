@@ -2,11 +2,12 @@ use std::{
     ops::DerefMut,
     sync::{mpsc::{Receiver, Sender}, Arc},
     thread,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use glam::Vec2;
 use parking_lot::Mutex;
+use spin_sleep::sleep;
 use winit::{
     event_loop::EventLoopProxy,
     window::{Window, WindowAttributes},
@@ -104,10 +105,9 @@ pub fn game(
     let root = uids.add();
     tree.insert(root, None);
     space.insert(root, Matrix2D::IDENTITY);
-    let _ = windows.request_new(
+    let _ = windows.request(
         root,
-        WindowAttributes::default().with_title("Untitled Rust Engine"),
-        &event_proxy,
+        WindowAttributes::default().with_title("Untitled Rust Engine")
     );
 
     // [VITAL] Frame Timing
@@ -115,6 +115,7 @@ pub fn game(
 
     // [VITAL] Game Loop
     'game: loop {
+        println!("Frame {:?}", Instant::now());
         // [VITAL] Time Frame
         let start = Instant::now();
         let delta = last_start.elapsed();
@@ -132,15 +133,16 @@ pub fn game(
         // [VITAL] Acquire Input State
         let input_state = input.lock().clone();
 
+        // [VITAL] Receive New Windows
+        windows.receive(&render);
+
         // ========================================================
         // GAME LOGIC
         // ========================================================
 
-        // [VITAL] Receive New Windows
-        windows.receive();
-
         // [USEFUL] Delete Window on Close
         for uid in input_state.close {
+            println!("Delete {:?}", Instant::now());
             delete.delete(&mut windows, uid);
         }
         delete.apply(&mut windows);
@@ -152,19 +154,16 @@ pub fn game(
 
         // [USEFUL] Quit when all windows are closed.
         if windows.is_empty() {
+            println!("Close {:?}", Instant::now());
             break 'game;
         }
 
-        for (uid, window) in windows.windows.iter() {
-            let _ = render.send(RenderCommand::Window(window.clone(), *uid));
-        }
-
-        // [USEFUL] GUI Layout
-        #[cfg(feature = "GUI")]
-        {
-            delete.apply(&mut layout);
-            layout.run();
-        }
+        // // [USEFUL] GUI Layout
+        // #[cfg(feature = "GUI")]
+        // {
+        //     delete.apply(&mut layout);
+        //     layout.run();
+        // }
 
         let _ = render.send(RenderCommand::Pass(root));
         draw_2d.start();
@@ -172,9 +171,7 @@ pub fn game(
         draw_2d.instances(instance);
         draw_2d.draw();
 
-        if render.send(RenderCommand::Submit).is_err() {
-            break 'game;
-        }
+        let _ = render.send(RenderCommand::Submit);
 
         // ========================================================
         // END OF FRAME

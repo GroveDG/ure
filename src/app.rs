@@ -1,7 +1,6 @@
-use std::{io::{self, Write}, sync::{mpsc::Sender, Arc}, time::{Duration, Instant}};
+use std::{sync::{mpsc::Sender, Arc}, time::Instant};
 
 use parking_lot::Mutex;
-use spin_sleep::sleep;
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -30,11 +29,11 @@ pub struct App {
 }
 
 impl ApplicationHandler<UserEvent> for App {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {}
+    fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
 
     fn window_event(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        _event_loop: &ActiveEventLoop,
         window_id: winit::window::WindowId,
         event: winit::event::WindowEvent,
     ) {

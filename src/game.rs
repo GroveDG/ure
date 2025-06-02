@@ -1,13 +1,11 @@
 use std::{
-    ops::DerefMut,
     sync::{mpsc::{Receiver, Sender}, Arc},
     thread,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use glam::Vec2;
 use parking_lot::Mutex;
-use spin_sleep::sleep;
 use winit::{
     event_loop::EventLoopProxy,
     window::{Window, WindowAttributes},
@@ -118,7 +116,7 @@ pub fn game(
         println!("Frame {:?}", Instant::now());
         // [VITAL] Time Frame
         let start = Instant::now();
-        let delta = last_start.elapsed();
+        let _delta = last_start.elapsed();
 
         // ========================================================
         // PRE-FRAME
@@ -158,12 +156,12 @@ pub fn game(
             break 'game;
         }
 
-        // // [USEFUL] GUI Layout
-        // #[cfg(feature = "GUI")]
-        // {
-        //     delete.apply(&mut layout);
-        //     layout.run();
-        // }
+        // [USEFUL] GUI Layout
+        #[cfg(feature = "GUI")]
+        {
+            delete.apply(&mut layout);
+            layout.run();
+        }
 
         let _ = render.send(RenderCommand::Pass(root));
         draw_2d.start();

@@ -14,6 +14,7 @@ pub struct Color {
     b: f32,
     a: f32,
 }
+#[allow(dead_code)]
 impl Color {
     pub const WHITE: Self = Color {
         r: 1.,
@@ -31,6 +32,7 @@ impl Color {
 
 pub struct GPU {
     pub instance: Instance,
+    #[allow(dead_code)]
     pub adapter: Adapter,
     pub device: Device,
     pub queue: Queue,

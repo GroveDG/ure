@@ -22,11 +22,10 @@
 
 use std::{
     sync::{mpsc::channel, Arc},
-    thread::{self}, time::{Duration, Instant},
+    thread::{self}, time::Instant,
 };
 
 use parking_lot::Mutex;
-use spin_sleep::sleep;
 use winit::{error::EventLoopError, event_loop::EventLoop};
 
 use crate::app::{App, input::Input};

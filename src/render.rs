@@ -148,7 +148,7 @@ pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
             }
         }
 
-        for (uid, (surface, window)) in surfaces.iter() {
+        for (uid, (surface, _)) in surfaces.iter() {
             surface_textures.insert(*uid, surface.get_current_texture().unwrap());
         }
 

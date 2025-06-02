@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use spin_sleep::{sleep, SpinSleeper};
+use spin_sleep::SpinSleeper;
 use winit::event_loop::EventLoopProxy;
 
 use crate::{app::UserEvent, render::RenderCommand};

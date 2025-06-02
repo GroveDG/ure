@@ -51,7 +51,7 @@ impl Windows {
             self.requested -= 1;
             let window = Arc::new(window);
             self.windows.insert(uid, window.clone());
-            render_sndr.send(RenderCommand::Window(window, uid));
+            let _ = render_sndr.send(RenderCommand::Window(window, uid));
         }
     }
     pub fn is_empty(&self) -> bool {

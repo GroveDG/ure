@@ -60,7 +60,6 @@ impl ApplicationHandler<UserEvent> for App {
             }
             UserEvent::Exit => {
                 event_loop.exit();
-                println!("EXITED {:?}", Instant::now());
                 return;
             }
         }

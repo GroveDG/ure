@@ -113,7 +113,6 @@ pub fn game(
 
     // [VITAL] Game Loop
     'game: loop {
-        println!("Frame {:?}", Instant::now());
         // [VITAL] Time Frame
         let start = Instant::now();
         let _delta = last_start.elapsed();
@@ -140,7 +139,6 @@ pub fn game(
 
         // [USEFUL] Delete Window on Close
         for uid in input_state.close {
-            println!("Delete {:?}", Instant::now());
             delete.delete(&mut windows, uid);
         }
         delete.apply(&mut windows);
@@ -152,7 +150,6 @@ pub fn game(
 
         // [USEFUL] Quit when all windows are closed.
         if windows.is_empty() {
-            println!("Close {:?}", Instant::now());
             break 'game;
         }
 

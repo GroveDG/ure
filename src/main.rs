@@ -58,7 +58,7 @@ fn main() {
             .spawn(move || {
                 render::render(render_recv, &parker);
                 let _ = parker.send(());
-                println!("RENDER THREAD QUIT {:?}", Instant::now());
+                println!("RENDER THREAD QUIT");
             })
             .unwrap()
     };
@@ -74,7 +74,7 @@ fn main() {
             .spawn(move || {
                 game::game(event_proxy, window_recv, input, render_sndr, &parker);
                 let _ = parker.send(());
-                println!("GAME THREAD QUIT {:?}", Instant::now());
+                println!("GAME THREAD QUIT");
             })
             .unwrap()
     };
@@ -92,27 +92,9 @@ fn main() {
         window_sndr,
         input,
     };
-    if let Err(e) = event_loop.run_app(&mut app) {
-        // [TRIVIAL] Expose Errors
-        match e {
-            EventLoopError::NotSupported(_) => {
-                println!("Operation unsupported (unspecified by winit)");
-            }
-            EventLoopError::Os(os_error) => {
-                println!("{}", os_error)
-            }
-            EventLoopError::RecreationAttempt => {
-                println!("Cannot recreate EventLoop")
-            }
-            EventLoopError::ExitFailure(error_code) => {
-                println!("Exit with error code: {}", error_code)
-            }
-        }
-    }
+    event_loop.run_app(&mut app).unwrap();
 
-    println!("APP THREAD QUIT {:?}", Instant::now());
+    println!("APP THREAD QUIT");
 
     let _ = timing.join();
-
-    println!("TIMING THREAD JOIN {:?}", Instant::now());
 }

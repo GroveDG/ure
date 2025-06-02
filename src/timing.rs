@@ -35,7 +35,6 @@ pub fn timing(
                 let _ = render.join();
                 // Request app thread quit.
                 let _ = event_proxy.send_event(UserEvent::Exit);
-                println!("EVENT SENT");
                 return;
             }
         }

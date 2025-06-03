@@ -132,14 +132,19 @@ pub fn game(
             layout.run();
         });
 
+        // ================================================================================================================
+        // RENDER
+        // ================================================================================================================
+
         // [VITAL] Apply Delete to Render Thread
         for uid in delete.iter().copied() {
             let _ = render.send(RenderCommand::Delete(uid));
         }
 
+        let _ = render.send(RenderCommand::Pass(root));
+
         // [EXAMPLE] Render Example Quad
         run!(draw_2d, {
-            let _ = render.send(RenderCommand::Pass(root));
             draw_2d.start();
             draw_2d.mesh(&quad);
             draw_2d.instances(instance);

@@ -173,7 +173,7 @@ pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         // [USEFUL] Clear Surface
-                        load: wgpu::LoadOp::Clear(Color::BLUE),
+                        load: wgpu::LoadOp::Clear(Color::BLACK),
                         store: wgpu::StoreOp::Store,
                     },
                 })],

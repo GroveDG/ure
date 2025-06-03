@@ -77,9 +77,10 @@ pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
     let mut buffers: Components<Buffer> = Default::default();
     let pipelines: Vec<RenderPipeline> = vec![Draw2D::pipeline(&gpu)];
 
+    let mut surface_textures: Components<SurfaceTexture> = Default::default();
+
     'render: loop {
         let mut command: RenderCommand;
-        let mut surface_textures: Components<SurfaceTexture> = Default::default();
 
         loop {
             command = commands.recv().unwrap();

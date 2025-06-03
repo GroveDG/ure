@@ -14,10 +14,7 @@ use winit::{
 };
 
 use crate::sys::{UIDs, delete::DeleteQueue};
-use crate::{
-    app::window::Windows,
-    sys::UID,
-};
+use crate::{app::window::Windows, sys::UID};
 use crate::{
     app::{UserEvent, input::Input},
     render::{
@@ -48,7 +45,7 @@ pub fn game(
 
     // [VITAL] Initialize Delete System
     let mut delete = DeleteQueue::default();
-    
+
     // [VITAL] Initialize Render Systems
     let mut windows = Windows::new(event_proxy.clone(), window_recv);
     let mut draw_2d = Draw2D::new(render.clone());
@@ -61,7 +58,7 @@ pub fn game(
     let mut space = Space2D::default();
 
     // [USEFUL] Initialize Default Entities
-    
+
     let (quad,) = draw_2d.primitives(&mut uids);
 
     let instance = uids.add();
@@ -87,6 +84,14 @@ pub fn game(
 
     // [VITAL] Game Loop
     'game: loop {
+        // [USEFUL] Define General System Behavior
+        macro_rules! run {
+            ($system:ident, $run:block) => {
+                delete.apply(&mut $system);
+                $run
+            };
+        }
+
         // [VITAL] Time Frame
         let start = Instant::now();
         let _delta = last_start.elapsed();
@@ -99,50 +104,47 @@ pub fn game(
         delete.start_frame();
 
         // [VITAL] Delete UIDs
-        delete.apply(&mut uids);
+        run!(uids, {});
 
         // [VITAL] Acquire Input State
         let input_state = std::mem::take(&mut *input.lock());
-
-        // [VITAL] Receive New Windows
-        windows.receive(&render);
 
         // ================================================================================================================
         // GAME LOGIC
         // ================================================================================================================
 
-        // [VITAL] Apply Delete to Windows
-        delete.apply(&mut windows);
-        // [USEFUL] Delete Window on Close
-        for uid in input_state.close {
-            delete.delete(&mut windows, uid);
-        }
+        run!(windows, {
+            // [VITAL] Receive New Windows
+            windows.receive(&render);
+            // [USEFUL] Delete Window on Close
+            for uid in input_state.close {
+                delete.delete(&mut windows, uid);
+            }
+            // [USEFUL] Quit when all windows are closed.
+            if windows.is_empty() {
+                break 'game;
+            }
+        });
+
+        // [USEFUL] GUI Layout
+        #[cfg(feature = "GUI")]
+        run!(layout, {
+            layout.run();
+        });
 
         // [VITAL] Apply Delete to Render Thread
         for uid in delete.iter().copied() {
             let _ = render.send(RenderCommand::Delete(uid));
         }
-        // [VITAL] Apply Delete to Draw2D Meshes
-        delete.apply(&mut draw_2d);
-
-        // [USEFUL] Quit when all windows are closed.
-        if windows.is_empty() {
-            break 'game;
-        }
-
-        // [USEFUL] GUI Layout
-        #[cfg(feature = "GUI")]
-        {
-            delete.apply(&mut layout);
-            layout.run();
-        }
 
         // [EXAMPLE] Render Example Quad
-        let _ = render.send(RenderCommand::Pass(root));
-        draw_2d.start();
-        draw_2d.mesh(&quad);
-        draw_2d.instances(instance);
-        draw_2d.draw();
+        run!(draw_2d, {
+            let _ = render.send(RenderCommand::Pass(root));
+            draw_2d.start();
+            draw_2d.mesh(&quad);
+            draw_2d.instances(instance);
+            draw_2d.draw();
+        });
 
         // [VITAL] Submit Rendering to GPU
         let _ = render.send(RenderCommand::Submit);

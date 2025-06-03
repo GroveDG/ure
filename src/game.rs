@@ -48,9 +48,20 @@ pub fn game(
 
     // [VITAL] Initialize Delete System
     let mut delete = DeleteQueue::default();
-
+    
+    // [VITAL] Initialize Render Systems
     let mut windows = Windows::new(event_proxy.clone(), window_recv);
     let mut draw_2d = Draw2D::new(render.clone());
+
+    // [USEFUL] Initialize UI Systems
+    let mut layout = Layout::default();
+
+    // [USEFUL] Initialize Game Systems
+    let mut tree = Tree::default();
+    let mut space = Space2D::default();
+
+    // [USEFUL] Initialize Default Entities
+    
     let (quad,) = draw_2d.primitives(&mut uids);
 
     let instance = uids.add();
@@ -62,16 +73,9 @@ pub fn game(
         }],
     );
 
-    // [USEFUL] Initialize UI Systems
-    let mut layout = Layout::default();
-
-    // [USEFUL] Initialize Game Systems
-    let mut tree = Tree::default();
-    let mut space = Space2D::default();
-
-    // [EXAMPLE] Init Root
+    // [USEFUL] Init Root
     let root = uids.add();
-    tree.insert(root, None);
+    tree.parent(root, None, None);
     space.insert(root, Matrix2D::IDENTITY);
     let _ = windows.request(
         root,

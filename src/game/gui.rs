@@ -38,7 +38,7 @@ impl Layout {
     pub fn run(&mut self) {
         for parent in self.tree.dfs_post() {
             let p_lay = self.lay.get(parent).unwrap();
-            let children = self.tree.children(Some(parent)).unwrap();
+            let children = self.tree.get_children(Some(parent)).unwrap();
 
             let (along_i, across_i) = match p_lay.direction {
                 Direction::Right => (0, 1),
@@ -92,10 +92,10 @@ impl Layout {
         self.tree.dfs_post()
     }
 
-    pub fn insert(&mut self, uid: UID, lay: Lay, parent: Option<UID>) {
+    pub fn insert(&mut self, uid: UID, lay: Lay, parent: Option<UID>, index: Option<usize>) {
         self.lay.insert(uid, lay);
         self.out.insert(uid, Default::default());
-        self.tree.insert(uid, parent);
+        self.tree.parent(uid, parent, index);
     }
 }
 impl Delete for Layout {

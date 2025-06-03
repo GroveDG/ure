@@ -1,10 +1,8 @@
 use crate::sys::{Components, UID, delete::Delete};
 
-
-
 #[derive(Debug, Default)]
 pub struct Tree {
-    map: Components<Node>,
+    nodes: Components<Node>,
     roots: Vec<UID>,
 }
 
@@ -15,73 +13,84 @@ pub struct Node {
 }
 
 impl Tree {
-    pub fn insert(&mut self, uid: UID, parent: Option<UID>) {
-        self.add_child(uid, parent.as_ref());
-        self.map.insert(
-            uid,
-            Node {
-                parent,
-                children: Vec::new(),
-            },
-        );
-    }
-
-    /// Returns an Err if parent does not exist.
-    fn add_child(&mut self, uid: UID, parent: Option<&UID>) {
-        if let Some(parent) = parent {
-            self.get_mut(parent).unwrap().children.push(uid);
+    pub fn parent(&mut self, child: UID, parent: Option<UID>, index: Option<usize>) {
+        if let Some(child_node) = self.nodes.get_mut(&child) {
+            let prev_parent = child_node.parent;
+            child_node.parent = parent;
+            let prev_siblings = self.get_children_mut(prev_parent.as_ref()).unwrap();
+            let index = prev_siblings
+                .iter()
+                .position(|sibling| *sibling == child)
+                .unwrap();
+            prev_siblings.remove(index);
         } else {
-            self.roots.push(uid);
+            self.nodes.insert(
+                child,
+                Node {
+                    parent,
+                    children: Vec::new(),
+                },
+            );
+        }
+        let siblings =
+            if let Some(parent_node) = parent.and_then(|parent| self.nodes.get_mut(&parent)) {
+                &mut parent_node.children
+            } else {
+                &mut self.roots
+            };
+        if let Some(index) = index {
+            siblings.insert(index, child);
+        } else {
+            siblings.push(child);
         }
     }
-
-    pub fn get(&self, uid: &UID) -> Option<&Node> {
-        self.map.get(uid)
-    }
-
-    fn get_mut(&mut self, uid: &UID) -> Option<&mut Node> {
-        self.map.get_mut(uid)
-    }
-
-    pub fn children(&self, parent: Option<&UID>) -> Option<&Vec<UID>> {
+    pub fn get_children(&self, parent: Option<&UID>) -> Option<&Vec<UID>> {
         if let Some(parent) = parent {
-            self.map.get(parent).map(|node| &node.children)
+            self.nodes.get(parent).map(|parent| &parent.children)
         } else {
             Some(&self.roots)
         }
     }
-
-    pub fn child(&self, parent: Option<&UID>, i: usize) -> Option<&UID> {
+    fn get_children_mut(&mut self, parent: Option<&UID>) -> Option<&mut Vec<UID>> {
         if let Some(parent) = parent {
-            &self.get(parent).unwrap().children
+            self.nodes
+                .get_mut(parent)
+                .map(|parent| &mut parent.children)
         } else {
-            &self.roots
+            Some(&mut self.roots)
         }
-        .get(i)
     }
-
+    pub fn get_child(&self, parent: Option<&UID>, index: usize) -> Option<&UID> {
+        parent
+            .as_ref()
+            .and_then(|parent| self.nodes.get(parent))
+            .and_then(|parent| parent.children.get(index))
+    }
+    pub fn nodes(&self) -> &Components<Node> {
+        &self.nodes
+    }
+    pub fn roots(&self) -> &Vec<UID> {
+        &self.roots
+    }
     pub fn dfs_post(&self) -> DFSPost {
         DFSPost::new(self)
-    }
-
-    pub fn dfs_pre(&self) -> DFSPre {
-        DFSPre::new(self)
     }
 }
 
 impl Delete for Tree {
     fn delete(&mut self, uid: &UID) {
-        let Some(node) = self.map.remove(uid) else {
+        let Some(node) = self.nodes.remove(uid) else {
             return;
         };
-        if let Some(parent) = node.parent {
-            self.map
-                .get_mut(&parent)
-                .unwrap()
-                .children
-                .retain(|child| child != uid);
-        } else {
-            self.roots.retain(|root| root != uid);
+        if let Some(siblings) = self.get_children_mut(node.parent.as_ref()) {
+            let index = siblings
+                .iter()
+                .position(|sibling| sibling == uid)
+                .unwrap();
+            siblings.remove(index);
+        }
+        for child in node.children {
+            self.parent(child, None, None);
         }
     }
 }
@@ -103,7 +112,12 @@ impl<'a> DFSPost<'a> {
     fn descend(&mut self) {
         loop {
             let (parent, i) = self.stack.last().unwrap();
-            let Some(child) = self.tree.child(parent.as_ref(), *i).copied() else {
+            let Some(child) = parent
+                .as_ref()
+                .and_then(|parent| self.tree.nodes.get(parent))
+                .and_then(|parent| parent.children.get(*i))
+                .copied()
+            else {
                 break;
             };
             self.stack.push((Some(child), 0));
@@ -118,7 +132,7 @@ impl<'a> Iterator for DFSPost<'a> {
             let Some((parent, i)) = self.stack.last_mut() else {
                 return None;
             };
-            let Some(child) = self.tree.child(parent.as_ref(), *i) else {
+            let Some(child) = self.tree.get_child(parent.as_ref(), *i) else {
                 self.stack.pop();
                 continue;
             };
@@ -129,33 +143,33 @@ impl<'a> Iterator for DFSPost<'a> {
     }
 }
 
-pub struct DFSPre<'a> {
-    tree: &'a Tree,
-    stack: Vec<(Option<UID>, usize)>,
-}
-impl<'a> DFSPre<'a> {
-    fn new(tree: &'a Tree) -> Self {
-        Self {
-            tree,
-            stack: vec![(tree.child(None, 0).copied(), 0)],
-        }
-    }
-}
-impl<'a> Iterator for DFSPre<'a> {
-    type Item = &'a UID;
+// pub struct DFSPre<'a> {
+//     tree: &'a Tree,
+//     stack: Vec<(Option<UID>, usize)>,
+// }
+// impl<'a> DFSPre<'a> {
+//     fn new(tree: &'a Tree) -> Self {
+//         Self {
+//             tree,
+//             stack: vec![(tree.child(None, 0).copied(), 0)],
+//         }
+//     }
+// }
+// impl<'a> Iterator for DFSPre<'a> {
+//     type Item = &'a UID;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        Some(loop {
-            let Some((parent, i)) = self.stack.last_mut() else {
-                return None;
-            };
-            let Some(child) = self.tree.child(parent.as_ref(), *i) else {
-                self.stack.pop();
-                continue;
-            };
-            *i += 1;
-            self.stack.push((Some(*child), 0));
-            break child;
-        })
-    }
-}
+//     fn next(&mut self) -> Option<Self::Item> {
+//         Some(loop {
+//             let Some((parent, i)) = self.stack.last_mut() else {
+//                 return None;
+//             };
+//             let Some(child) = self.tree.child(parent.as_ref(), *i) else {
+//                 self.stack.pop();
+//                 continue;
+//             };
+//             *i += 1;
+//             self.stack.push((Some(*child), 0));
+//             break child;
+//         })
+//     }
+// }

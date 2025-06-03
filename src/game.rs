@@ -1,18 +1,23 @@
 use std::{
-    sync::{mpsc::{Receiver, Sender}, Arc},
+    sync::{
+        Arc,
+        mpsc::{Receiver, Sender},
+    },
     thread,
     time::Instant,
 };
 
-use glam::Vec2;
 use parking_lot::Mutex;
 use winit::{
     event_loop::EventLoopProxy,
     window::{Window, WindowAttributes},
 };
 
-use crate::{app::window::Windows, render::_2d::{Mesh2D, Vertex2D}, sys::UID};
 use crate::sys::{UIDs, delete::DeleteQueue};
+use crate::{
+    app::window::Windows,
+    sys::UID,
+};
 use crate::{
     app::{UserEvent, input::Input},
     render::{
@@ -46,51 +51,16 @@ pub fn game(
 
     let mut windows = Windows::new(event_proxy.clone(), window_recv);
     let mut draw_2d = Draw2D::new(render.clone());
+    let (quad,) = draw_2d.primitives(&mut uids);
 
-    // [VITAL] Initialize Draw Buffer
-    let quad = uids.add();
-    {
-        let quad_mesh = Mesh2D {
-            vertex: vec![
-                Vertex2D {
-                    // Top Left
-                    position: Vec2 { x: -0.5, y: 0.5 },
-                    color: Color::WHITE,
-                    uv: Vec2::ZERO,
-                },
-                Vertex2D {
-                    // Top Right
-                    position: Vec2 { x: -0.5, y: -0.5 },
-                    color: Color::WHITE,
-                    uv: Vec2::X,
-                },
-                Vertex2D {
-                    // Bottom Left
-                    position: Vec2 { x: 0.5, y: 0.5 },
-                    color: Color::WHITE,
-                    uv: Vec2::Y,
-                },
-                Vertex2D {
-                    // Bottom Right
-                    position: Vec2 { x: 0.5, y: -0.5 },
-                    color: Color::WHITE,
-                    uv: Vec2::ONE,
-                },
-            ],
-            index: vec![0, 1, 2, 2, 1, 3],
-        };
-        draw_2d.update_mesh(quad, &mut uids, quad_mesh);
-    }
     let instance = uids.add();
-    {
-        draw_2d.update_instances(
-            instance,
-            vec![Instance2D {
-                tf: Default::default(),
-                color: Color::WHITE,
-            }],
-        );
-    }
+    draw_2d.update_instances(
+        instance,
+        vec![Instance2D {
+            tf: Default::default(),
+            color: Color::WHITE,
+        }],
+    );
 
     // [USEFUL] Initialize UI Systems
     let mut layout = Layout::default();
@@ -105,7 +75,7 @@ pub fn game(
     space.insert(root, Matrix2D::IDENTITY);
     let _ = windows.request(
         root,
-        WindowAttributes::default().with_title("Untitled Rust Engine")
+        WindowAttributes::default().with_title("Untitled Rust Engine"),
     );
 
     // [VITAL] Frame Timing
@@ -117,35 +87,38 @@ pub fn game(
         let start = Instant::now();
         let _delta = last_start.elapsed();
 
-        // ========================================================
+        // ================================================================================================================
         // PRE-FRAME
-        // ========================================================
+        // ================================================================================================================
 
         // [VITAL] Clear Old Delete Requests
         delete.start_frame();
 
-        // Delete UIDs
+        // [VITAL] Delete UIDs
         delete.apply(&mut uids);
 
         // [VITAL] Acquire Input State
-        let input_state = input.lock().clone();
+        let input_state = std::mem::take(&mut *input.lock());
 
         // [VITAL] Receive New Windows
         windows.receive(&render);
 
-        // ========================================================
+        // ================================================================================================================
         // GAME LOGIC
-        // ========================================================
+        // ================================================================================================================
 
+        // [VITAL] Apply Delete to Windows
+        delete.apply(&mut windows);
         // [USEFUL] Delete Window on Close
         for uid in input_state.close {
             delete.delete(&mut windows, uid);
         }
-        delete.apply(&mut windows);
 
+        // [VITAL] Apply Delete to Render Thread
         for uid in delete.iter().copied() {
             let _ = render.send(RenderCommand::Delete(uid));
         }
+        // [VITAL] Apply Delete to Draw2D Meshes
         delete.apply(&mut draw_2d);
 
         // [USEFUL] Quit when all windows are closed.
@@ -160,17 +133,19 @@ pub fn game(
             layout.run();
         }
 
+        // [EXAMPLE] Render Example Quad
         let _ = render.send(RenderCommand::Pass(root));
         draw_2d.start();
         draw_2d.mesh(&quad);
         draw_2d.instances(instance);
         draw_2d.draw();
 
+        // [VITAL] Submit Rendering to GPU
         let _ = render.send(RenderCommand::Submit);
 
-        // ========================================================
+        // ================================================================================================================
         // END OF FRAME
-        // ========================================================
+        // ================================================================================================================
 
         // [VITAL] Store Start of Last Frame
         last_start = start;

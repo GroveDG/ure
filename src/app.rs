@@ -1,4 +1,4 @@
-use std::{sync::{mpsc::Sender, Arc}, time::Instant};
+use std::sync::{mpsc::Sender, Arc};
 
 use parking_lot::Mutex;
 use winit::{

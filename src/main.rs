@@ -22,11 +22,11 @@
 
 use std::{
     sync::{mpsc::channel, Arc},
-    thread::{self}, time::Instant,
+    thread::{self},
 };
 
 use parking_lot::Mutex;
-use winit::{error::EventLoopError, event_loop::EventLoop};
+use winit::event_loop::EventLoop;
 
 use crate::app::{App, input::Input};
 
@@ -96,5 +96,6 @@ fn main() {
 
     println!("APP THREAD QUIT");
 
+    // [VITAL] Prevent Dangling Threads
     let _ = timing.join();
 }

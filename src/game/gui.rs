@@ -65,22 +65,13 @@ impl Layout {
             }
 
             if fit[0] || fit[1] {
-                let out_size = &mut out_size;
-                let mut sizing_fn: Box<dyn FnMut(&Rect)> = match (fit[along_i], fit[across_i]) {
-                    (true, true) => Box::new(|child: &Rect| {
-                        out_size[along_i] += child.size[along_i];
-                        out_size[across_i] += child.size[across_i];
-                    }),
-                    (true, false) => {
-                        Box::new(|child: &Rect| out_size[along_i] += child.size[along_i])
-                    }
-                    (false, true) => {
-                        Box::new(|child: &Rect| out_size[across_i] += child.size[across_i])
-                    }
-                    (false, false) => unreachable!(),
-                };
                 for child in children.iter().map(|child| self.out.get(child).unwrap()) {
-                    (sizing_fn)(child);
+                    if fit[along_i] {
+                        out_size[along_i] += child.size[along_i]
+                    }
+                    if fit[across_i] {
+                        out_size[across_i] += child.size[across_i]
+                    }
                 }
             }
 

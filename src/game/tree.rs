@@ -1,8 +1,3 @@
-use serde::{
-    Serialize,
-    ser::{SerializeSeq, SerializeTupleStruct},
-};
-
 use crate::sys::{Components, UID, delete::Delete};
 
 
@@ -162,46 +157,5 @@ impl<'a> Iterator for DFSPre<'a> {
             self.stack.push((Some(*child), 0));
             break child;
         })
-    }
-}
-
-impl Serialize for Tree {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        struct ChildNodes<'a> {
-            tree: &'a Tree,
-            parent: Option<&'a UID>,
-        }
-        impl<'a> Serialize for ChildNodes<'a> {
-            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-            where
-                S: serde::Serializer,
-            {
-                let children = self.tree.children(self.parent).unwrap();
-                let mut serializer = serializer.serialize_seq(Some(children.len()))?;
-                for child in children {
-                    if self.tree.children(Some(child)).unwrap().is_empty() {
-                        serializer.serialize_element(child)?;
-                    } else {
-                        serializer.serialize_element(&(
-                            child,
-                            Self {
-                                tree: self.tree,
-                                parent: Some(child),
-                            },
-                        ))?;
-                    }
-                }
-                serializer.end()
-            }
-        }
-        let mut serializer = serializer.serialize_tuple_struct("Tree", 1)?;
-        serializer.serialize_field(&ChildNodes {
-            tree: self,
-            parent: None,
-        })?;
-        serializer.end()
     }
 }

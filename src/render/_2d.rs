@@ -2,7 +2,8 @@ use std::sync::mpsc::Sender;
 
 use glam::Vec2;
 use wgpu::{
-    BufferUsages, FilterMode, FragmentState, MultisampleState, PipelineCompilationOptions, RenderPipeline, RenderPipelineDescriptor, VertexAttribute, VertexBufferLayout, VertexState
+    BufferUsages, FilterMode, FragmentState, MultisampleState, PipelineCompilationOptions,
+    RenderPipeline, RenderPipelineDescriptor, VertexAttribute, VertexBufferLayout, VertexState,
 };
 
 use crate::{
@@ -134,6 +135,43 @@ impl Draw2D {
             render_sndr,
             meshes: Default::default(),
         }
+    }
+    pub fn primitives(&mut self, uids: &mut UIDs) -> (UID,) {
+        let quad = uids.add();
+        self.update_mesh(
+            quad,
+            uids,
+            Mesh2D {
+                vertex: vec![
+                    Vertex2D {
+                        // Top Left
+                        position: Vec2 { x: -0.5, y: 0.5 },
+                        color: Color::WHITE,
+                        uv: Vec2::ZERO,
+                    },
+                    Vertex2D {
+                        // Top Right
+                        position: Vec2 { x: -0.5, y: -0.5 },
+                        color: Color::WHITE,
+                        uv: Vec2::X,
+                    },
+                    Vertex2D {
+                        // Bottom Left
+                        position: Vec2 { x: 0.5, y: 0.5 },
+                        color: Color::WHITE,
+                        uv: Vec2::Y,
+                    },
+                    Vertex2D {
+                        // Bottom Right
+                        position: Vec2 { x: 0.5, y: -0.5 },
+                        color: Color::WHITE,
+                        uv: Vec2::ONE,
+                    },
+                ],
+                index: vec![0, 1, 2, 2, 1, 3],
+            },
+        );
+        (quad,)
     }
     pub fn update_mesh(&mut self, uid: UID, uids: &mut UIDs, mesh: Mesh2D) {
         if !self.meshes.contains_key(&uid) {

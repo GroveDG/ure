@@ -33,7 +33,7 @@ impl Layout {
     5. Grow & Shrink Sizing Heights
     6. Positions
     7. Draw
-    https://youtu.be/by9lQvpvMIc?t=2179 */
+    https://youtu.be/by9lQvpvMIc */
 
     pub fn run(&mut self) {
         for parent in self.tree.dfs_post() {

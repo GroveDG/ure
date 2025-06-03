@@ -132,16 +132,6 @@ pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
                         desired_maximum_frame_latency: 1,
                         present_mode: wgpu::PresentMode::Mailbox,
                     };
-                    // [BUG] On X11, when rapidly and repeatedly resizing
-                    // (far more than is realistic) the mutex that
-                    // configure uses becomes locked elsewhere and
-                    // this thread becomes unresponsive.
-                    //
-                    // This may also be happening in get_current_texture
-                    // since they both use the same mutex.
-                    //
-                    // This could also be in some other mutex within
-                    // WGPU since it uses a lot of mutexes.
                     surface.configure(&gpu.device, &config);
                     surfaces.insert(uid, (surface, window));
                 }

@@ -40,7 +40,7 @@ impl DeleteQueue {
         self.queue.swap(0, 1);
     }
     pub fn apply(&self, system: &mut dyn Delete) {
-        for uid in self.queue[0].iter().chain(self.queue[1].iter()) {
+        for uid in self.iter() {
             system.delete(uid);
         }
     }

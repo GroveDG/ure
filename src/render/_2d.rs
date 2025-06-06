@@ -2,8 +2,7 @@ use std::sync::mpsc::Sender;
 
 use glam::Vec2;
 use wgpu::{
-    BufferUsages, FilterMode, FragmentState, MultisampleState, PipelineCompilationOptions,
-    RenderPipeline, RenderPipelineDescriptor, VertexAttribute, VertexBufferLayout, VertexState,
+    util::DeviceExt, BindGroup, BindGroupLayoutDescriptor, Buffer, BufferUsages, FilterMode, FragmentState, MultisampleState, PipelineCompilationOptions, RenderPipeline, RenderPipelineDescriptor, VertexAttribute, VertexBufferLayout, VertexState
 };
 
 use crate::{
@@ -76,6 +75,7 @@ impl Instance2D {
 pub struct Draw2D {
     render_sndr: Sender<RenderCommand>,
     meshes: Components<(UID, UID)>,
+    pub camera: Matrix2D,
 }
 impl Draw2D {
     pub fn pipeline(gpu: &GPU) -> RenderPipeline {
@@ -83,11 +83,44 @@ impl Draw2D {
             .device
             .create_shader_module(wgpu::include_wgsl!("2d.wgsl"));
 
+        let camera_layout = gpu
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: None,
+            });
+
+        let camera_buffer = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Camera Buffer"),
+                contents: bytemuck::cast_slice(&[Matrix2D::IDENTITY]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            }
+        );
+
+        let camera_bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &camera_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
+            label: Some("camera_bind_group"),
+        });
+
         let layout = gpu
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
-                bind_group_layouts: &[],
+                bind_group_layouts: &[&camera_layout],
                 push_constant_ranges: &[],
             });
 
@@ -134,6 +167,7 @@ impl Draw2D {
         Self {
             render_sndr,
             meshes: Default::default(),
+            camera: Matrix2D::IDENTITY,
         }
     }
     pub fn primitives(&mut self, uids: &mut UIDs) -> (UID,) {
@@ -186,19 +220,19 @@ impl Draw2D {
         let _ = self.render_sndr.send(RenderCommand::Buffer(
             vertex,
             bytemuck::cast_slice(&mesh.vertex).to_vec(),
-            BufferUsages::VERTEX,
+            BufferUsages::VERTEX | BufferUsages::COPY_DST,
         ));
         let _ = self.render_sndr.send(RenderCommand::Buffer(
             index,
             bytemuck::cast_slice(&mesh.index).to_vec(),
-            BufferUsages::INDEX,
+            BufferUsages::INDEX | BufferUsages::COPY_DST,
         ));
     }
     pub fn update_instances(&self, uid: UID, instances: Vec<Instance2D>) {
         let _ = self.render_sndr.send(RenderCommand::Buffer(
             uid,
             bytemuck::cast_slice(&instances).to_vec(),
-            BufferUsages::VERTEX,
+            BufferUsages::VERTEX | BufferUsages::COPY_DST,
         ));
     }
     pub fn start(&self) {
@@ -206,8 +240,8 @@ impl Draw2D {
             .render_sndr
             .send(RenderCommand::Pipeline(super::Pipelines::_2D));
     }
-    pub fn mesh(&self, uid: &UID) {
-        let (vertex, index) = self.meshes.get(uid).copied().unwrap();
+    pub fn mesh(&self, uid: UID) {
+        let (vertex, index) = self.meshes.get(&uid).copied().unwrap();
         let _ = self
             .render_sndr
             .send(RenderCommand::Vertex(0, vertex, None));

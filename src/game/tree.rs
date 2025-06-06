@@ -61,10 +61,8 @@ impl Tree {
         }
     }
     pub fn get_child(&self, parent: Option<&UID>, index: usize) -> Option<&UID> {
-        parent
-            .as_ref()
-            .and_then(|parent| self.nodes.get(parent))
-            .and_then(|parent| parent.children.get(index))
+        self.get_children(parent)
+            .and_then(|children| children.get(index))
     }
     pub fn nodes(&self) -> &Components<Node> {
         &self.nodes
@@ -75,6 +73,9 @@ impl Tree {
     pub fn dfs_post(&self) -> DFSPost {
         DFSPost::new(self)
     }
+    pub fn dfs_pre(&self) -> DFSPre {
+        DFSPre::new(self)
+    }
 }
 
 impl Delete for Tree {
@@ -83,10 +84,7 @@ impl Delete for Tree {
             return;
         };
         if let Some(siblings) = self.get_children_mut(node.parent.as_ref()) {
-            let index = siblings
-                .iter()
-                .position(|sibling| sibling == uid)
-                .unwrap();
+            let index = siblings.iter().position(|sibling| sibling == uid).unwrap();
             siblings.remove(index);
         }
         for child in node.children {
@@ -112,12 +110,7 @@ impl<'a> DFSPost<'a> {
     fn descend(&mut self) {
         loop {
             let (parent, i) = self.stack.last().unwrap();
-            let Some(child) = parent
-                .as_ref()
-                .and_then(|parent| self.tree.nodes.get(parent))
-                .and_then(|parent| parent.children.get(*i))
-                .copied()
-            else {
+            let Some(child) = self.tree.get_child(parent.as_ref(), *i).copied() else {
                 break;
             };
             self.stack.push((Some(child), 0));
@@ -143,33 +136,33 @@ impl<'a> Iterator for DFSPost<'a> {
     }
 }
 
-// pub struct DFSPre<'a> {
-//     tree: &'a Tree,
-//     stack: Vec<(Option<UID>, usize)>,
-// }
-// impl<'a> DFSPre<'a> {
-//     fn new(tree: &'a Tree) -> Self {
-//         Self {
-//             tree,
-//             stack: vec![(tree.child(None, 0).copied(), 0)],
-//         }
-//     }
-// }
-// impl<'a> Iterator for DFSPre<'a> {
-//     type Item = &'a UID;
+pub struct DFSPre<'a> {
+    tree: &'a Tree,
+    stack: Vec<(Option<UID>, usize)>,
+}
+impl<'a> DFSPre<'a> {
+    fn new(tree: &'a Tree) -> Self {
+        Self {
+            tree,
+            stack: vec![(None, 0)],
+        }
+    }
+}
+impl<'a> Iterator for DFSPre<'a> {
+    type Item = &'a UID;
 
-//     fn next(&mut self) -> Option<Self::Item> {
-//         Some(loop {
-//             let Some((parent, i)) = self.stack.last_mut() else {
-//                 return None;
-//             };
-//             let Some(child) = self.tree.child(parent.as_ref(), *i) else {
-//                 self.stack.pop();
-//                 continue;
-//             };
-//             *i += 1;
-//             self.stack.push((Some(*child), 0));
-//             break child;
-//         })
-//     }
-// }
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(loop {
+            let Some((parent, i)) = self.stack.last_mut() else {
+                return None;
+            };
+            let Some(child) = self.tree.get_child(parent.as_ref(), *i) else {
+                self.stack.pop();
+                continue;
+            };
+            *i += 1;
+            self.stack.push((Some(*child), 0));
+            break child;
+        })
+    }
+}

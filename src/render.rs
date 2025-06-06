@@ -87,29 +87,25 @@ pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
 
             match command {
                 RenderCommand::Buffer(uid, data, usage) => {
-                    let buffer = buffers.insert(
-                        uid,
-                        gpu.device.create_buffer_init(&BufferInitDescriptor {
-                            label: None,
-                            contents: bytemuck::cast_slice(&data),
-                            usage: usage,
-                        }),
-                    );
-                    if let Some(buffer) = buffer {
+                    let buffer = buffers.get_mut(&uid);
+                    let recreate = buffer.is_none_or(|buffer| {
                         if buffer.size() == data.len() as u64 {
-                            let capture = buffer.clone();
-                            buffer.map_async(wgpu::MapMode::Write, .., move |result| {
-                                if result.is_err() {
-                                    return;
-                                }
-                                let mut view = capture.get_mapped_range_mut(..);
-                                view.copy_from_slice(&data);
-                                drop(view);
-                                capture.unmap();
-                            });
+                            gpu.queue.write_buffer(&buffer, 0, &data);
+                            false
                         } else {
                             buffer.destroy();
+                            true
                         }
+                    });
+                    if recreate {
+                        buffers.insert(
+                            uid,
+                            gpu.device.create_buffer_init(&BufferInitDescriptor {
+                                label: None,
+                                contents: bytemuck::cast_slice(&data),
+                                usage,
+                            }),
+                        );
                     }
                 }
                 RenderCommand::Delete(uid) => {

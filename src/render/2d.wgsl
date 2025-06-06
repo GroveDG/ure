@@ -28,7 +28,7 @@ fn vertex(
         instance.row1,
         instance.row2,
     );
-    out.clip_position = vec4<f32>(vertex.position.x, vertex.position.y, 0., 1.0);
+    out.clip_position = (transform * vec3<f32>(vertex.position.x, vertex.position.y, 1.0)).xyzz;
     out.color = vertex.color * instance.color;
     return out;
 }

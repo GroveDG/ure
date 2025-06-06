@@ -2,10 +2,11 @@
 //!
 //!
 
-use glam::Vec2;
-use wgpu::Color;
+use glam::{Mat3, Vec2};
 
-use crate::render::gpu::Pixels;
+use crate::render::_2d::{Draw2D, Instance2D};
+use crate::render::gpu::{Color, Pixels};
+use crate::sys::UIDs;
 use crate::sys::{Components, UID, delete::Delete};
 
 use super::{
@@ -13,15 +14,15 @@ use super::{
     tree::{DFSPost, Tree},
 };
 
-
-
 /// Layout is not Rendering, the two passes cannot happen at once.
 ///
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Layout {
     tree: Tree,
-    lay: Components<Lay>,
-    out: Components<Rect>,
+    layout: Components<(Lay, Rect)>,
+    quad: UID,
+    instances: UID,
+    change: bool,
 }
 
 impl Layout {
@@ -35,19 +36,33 @@ impl Layout {
     7. Draw
     https://youtu.be/by9lQvpvMIc */
 
-    pub fn run(&mut self) {
+    pub fn new(quad: UID, uids: &mut UIDs) -> Self {
+        Self {
+            tree: Default::default(),
+            layout: Default::default(),
+            quad,
+            instances: uids.add(),
+            change: true,
+        }
+    }
+
+    pub fn run(&mut self, draw_2d: &Draw2D) {
+        if !self.change {
+            return;
+        }
+
         for parent in self.tree.dfs_post() {
-            let p_lay = self.lay.get(parent).unwrap();
+            let (lay, out) = self.layout.get(parent).unwrap();
             let children = self.tree.get_children(Some(parent)).unwrap();
 
-            let (along_i, across_i) = match p_lay.direction {
+            let (along_i, across_i) = match lay.direction {
                 Direction::Right => (0, 1),
                 Direction::Down => (1, 0),
             };
             let mut fit = [false, false];
             let mut out_size: Vec2 = Vec2::ZERO;
 
-            match p_lay.size.w.sizing {
+            match lay.size.w.sizing {
                 Sizing::Fit => fit[0] = true,
                 Sizing::Fill => todo!(),
                 Sizing::Size(size) => match size {
@@ -55,7 +70,7 @@ impl Layout {
                     _ => {}
                 },
             }
-            match p_lay.size.h.sizing {
+            match lay.size.h.sizing {
                 Sizing::Fit => fit[1] = true,
                 Sizing::Fill => todo!(),
                 Sizing::Size(size) => match size {
@@ -65,50 +80,66 @@ impl Layout {
             }
 
             if fit[0] || fit[1] {
-                for child in children.iter().map(|child| self.out.get(child).unwrap()) {
+                for (_, out) in children.iter().map(|child| self.layout.get(child).unwrap()) {
                     if fit[along_i] {
-                        out_size[along_i] += child.size[along_i]
+                        out_size[along_i] += out.size[along_i]
                     }
                     if fit[across_i] {
-                        out_size[across_i] += child.size[across_i]
+                        out_size[across_i] += out.size[across_i]
                     }
                 }
             }
 
-            let p_out = self.out.get_mut(parent).unwrap();
+            let (lay, out) = self.layout.get_mut(parent).unwrap();
 
-            out_size.x += p_lay.pad.left + p_lay.pad.right;
-            out_size.y += p_lay.pad.up + p_lay.pad.down;
+            out_size.x += lay.pad.left + lay.pad.right;
+            out_size.y += lay.pad.up + lay.pad.down;
 
-            p_out.size = out_size;
+            out.size = out_size;
         }
+
+        let instances: Vec<_> = self
+            .tree
+            .dfs_pre()
+            .filter_map(|uid| self.layout.get(uid))
+            .map(|(lay, out)| Instance2D {
+                tf: Mat3::from_scale_angle_translation(out.size, 0.0, out.pos + out.size / 2.0),
+                color: Color::WHITE,
+            })
+            .collect();
+        draw_2d.update_instances(self.instances, instances);
+
+        self.change = false;
     }
 
-    pub fn get_rect(&self, uid: &UID) -> Option<&Rect> {
-        self.out.get(uid)
-    }
-
-    pub fn render_order<'a>(&'a self) -> DFSPost<'a> {
-        self.tree.dfs_post()
+    pub fn draw(&self, draw_2d: &Draw2D) {
+        draw_2d.mesh(self.quad);
+        draw_2d.instances(self.instances);
+        draw_2d.draw();
     }
 
     pub fn insert(&mut self, uid: UID, lay: Lay, parent: Option<UID>, index: Option<usize>) {
-        self.lay.insert(uid, lay);
-        self.out.insert(uid, Default::default());
+        self.layout.insert(uid, (lay, Default::default()));
         self.tree.parent(uid, parent, index);
+        self.change = true;
+    }
+
+    pub fn get_mut(&mut self, uid: &UID) -> Option<&mut Lay> {
+        self.change = true;
+        self.layout.get_mut(uid).map(|layout| &mut layout.0)
     }
 }
 impl Delete for Layout {
     fn delete(&mut self, uid: &UID) {
-        self.lay.remove(uid);
-        self.out.remove(uid);
+        self.layout.remove(uid);
+        self.tree.delete(uid);
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum Size {
     Fixed(Pixels),
-    Ratio(Precision),
+    Percent(Precision),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -192,12 +223,12 @@ impl Default for Lay {
                 w: AxisSize {
                     min: None,
                     max: None,
-                    sizing: Sizing::Size(Size::Ratio(1.)),
+                    sizing: Sizing::Size(Size::Percent(1.)),
                 },
                 h: AxisSize {
                     min: None,
                     max: None,
-                    sizing: Sizing::Size(Size::Ratio(1.)),
+                    sizing: Sizing::Size(Size::Percent(1.)),
                 },
             },
             pad: Default::default(),
@@ -208,17 +239,14 @@ impl Default for Lay {
     }
 }
 impl Lay {
-    pub fn fix_w(mut self, w: Pixels) -> Self {
+    pub fn fix_w(&mut self, w: Pixels) {
         self.size.w.sizing = Sizing::Size(Size::Fixed(w));
-        self
     }
-    pub fn fix_h(mut self, h: Pixels) -> Self {
+    pub fn fix_h(&mut self, h: Pixels) {
         self.size.h.sizing = Sizing::Size(Size::Fixed(h));
-        self
     }
-    pub fn fix_size(mut self, w: Pixels, h: Pixels) -> Self {
-        self.size.w.sizing = Sizing::Size(Size::Fixed(w));
-        self.size.h.sizing = Sizing::Size(Size::Fixed(h));
-        self
+    pub fn fix_size(&mut self, w: Pixels, h: Pixels) {
+        self.fix_w(w);
+        self.fix_h(h);
     }
 }

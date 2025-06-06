@@ -12,13 +12,9 @@
 //! [https://sotrh.github.io/learn-wgpu/].
 
 use std::{
-    hint::black_box,
-    ops::Range,
-    sync::{
-        Arc,
-        mpsc::{Receiver, Sender},
-    },
-    thread,
+    hint::black_box, ops::Range, pin::Pin, sync::{
+        mpsc::{Receiver, Sender}, Arc
+    }, thread
 };
 
 use _2d::Draw2D;
@@ -28,7 +24,7 @@ use wgpu::{
 };
 use winit::window::Window;
 
-use crate::sys::{Components, UID};
+use crate::{render::gpu::BlockingFuture, sys::{Components, UID}};
 
 use self::gpu::GPU;
 
@@ -71,7 +67,7 @@ pub enum Pipelines {
 }
 
 pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
-    let gpu = futures::executor::block_on(GPU::new());
+    let gpu = GPU::new().block();
 
     let mut surfaces: Components<(Surface, Arc<Window>)> = Default::default();
     let mut buffers: Components<Buffer> = Default::default();

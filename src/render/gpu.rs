@@ -1,3 +1,6 @@
+use std::{pin::{pin, Pin}, task::{Context, RawWaker, RawWakerVTable, Waker}, time::Duration};
+
+use spin_sleep::SpinSleeper;
 use wgpu::{
     Adapter, Device, Instance, InstanceDescriptor, Queue, RequestAdapterOptions,
     wgt::DeviceDescriptor,
@@ -57,3 +60,39 @@ impl GPU {
         }
     }
 }
+
+// https://users.rust-lang.org/t/simplest-possible-block-on/48364
+unsafe fn rwclone(_p: *const ()) -> RawWaker {
+    make_raw_waker()
+}
+unsafe fn rwwake(_p: *const ()) {}
+unsafe fn rwwakebyref(_p: *const ()) {}
+unsafe fn rwdrop(_p: *const ()) {}
+
+static VTABLE: RawWakerVTable = RawWakerVTable::new(rwclone, rwwake, rwwakebyref, rwdrop);
+
+fn make_raw_waker() -> RawWaker {
+    static DATA: () = ();
+    RawWaker::new(&DATA, &VTABLE)
+}
+
+pub trait BlockingFuture: Future + Sized {
+    fn block(self) -> <Self as Future>::Output {
+        let sleeper = SpinSleeper::default();
+        let mut boxed = Box::pin(self);
+        let waker = unsafe { Waker::from_raw(make_raw_waker()) };
+        let mut ctx = Context::from_waker(&waker);
+        loop {
+            match boxed.as_mut().poll(&mut ctx) {
+                std::task::Poll::Ready(x) => {
+                    return x;
+                }
+                std::task::Poll::Pending => {
+                    sleeper.sleep(Duration::from_millis(10));
+                }
+            }
+        }
+    }
+}
+
+impl<F:Future + Sized> BlockingFuture for F {}

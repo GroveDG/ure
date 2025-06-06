@@ -65,7 +65,7 @@ impl Instance2D {
         // Color
         6 => Float32x4,
     ];
-    const DESCRIPTOR: VertexBufferLayout<'static> = VertexBufferLayout {
+    const LAYOUT: VertexBufferLayout<'static> = VertexBufferLayout {
         array_stride: std::mem::size_of::<Self>() as u64,
         step_mode: wgpu::VertexStepMode::Instance,
         attributes: Self::ATTRIBUTES,
@@ -83,44 +83,44 @@ impl Draw2D {
             .device
             .create_shader_module(wgpu::include_wgsl!("2d.wgsl"));
 
-        let camera_layout = gpu
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: None,
-            });
+        // let camera_layout = gpu
+        //     .device
+        //     .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        //         entries: &[wgpu::BindGroupLayoutEntry {
+        //             binding: 0,
+        //             visibility: wgpu::ShaderStages::VERTEX,
+        //             ty: wgpu::BindingType::Buffer {
+        //                 ty: wgpu::BufferBindingType::Uniform,
+        //                 has_dynamic_offset: false,
+        //                 min_binding_size: None,
+        //             },
+        //             count: None,
+        //         }],
+        //         label: None,
+        //     });
 
-        let camera_buffer = gpu.device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Camera Buffer"),
-                contents: bytemuck::cast_slice(&[Matrix2D::IDENTITY]),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            }
-        );
+        // let camera_buffer = gpu.device.create_buffer_init(
+        //     &wgpu::util::BufferInitDescriptor {
+        //         label: Some("Camera Buffer"),
+        //         contents: bytemuck::cast_slice(&[Matrix2D::IDENTITY]),
+        //         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        //     }
+        // );
 
-        let camera_bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &camera_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
-            label: Some("camera_bind_group"),
-        });
+        // let camera_bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        //     layout: &camera_layout,
+        //     entries: &[wgpu::BindGroupEntry {
+        //         binding: 0,
+        //         resource: camera_buffer.as_entire_binding(),
+        //     }],
+        //     label: Some("camera_bind_group"),
+        // });
 
         let layout = gpu
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
-                bind_group_layouts: &[&camera_layout],
+                bind_group_layouts: &[],
                 push_constant_ranges: &[],
             });
 
@@ -132,7 +132,7 @@ impl Draw2D {
                     module: &shader,
                     entry_point: Some("vertex"),
                     compilation_options: PipelineCompilationOptions::default(),
-                    buffers: &[Vertex2D::LAYOUT, Instance2D::DESCRIPTOR],
+                    buffers: &[Vertex2D::LAYOUT, Instance2D::LAYOUT],
                 },
                 fragment: Some(FragmentState {
                     module: &shader,

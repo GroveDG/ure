@@ -132,7 +132,9 @@ pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
         }
 
         for (uid, (surface, _)) in surfaces.iter() {
-            surface_textures.insert(*uid, surface.get_current_texture().unwrap());
+            if let Ok(surface_texture) = surface.get_current_texture() {
+                surface_textures.insert(*uid, surface_texture);
+            }
         }
 
         let mut encoder = gpu.device.create_command_encoder(&Default::default());
@@ -203,16 +205,14 @@ pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
 
         match command {
             RenderCommand::Submit => {
+                // [VITAL] Signal End of Frame
+                let _ = parker.send(());
+
                 black_box(gpu.queue.submit([encoder.finish()]));
 
                 for (_, surface_texture) in surface_textures.drain() {
                     surface_texture.present();
                 }
-
-                // [VITAL] Signal End of Frame
-                let _ = parker.send(());
-                // [VITAL] Wait for Next Frame
-                thread::park();
             }
             RenderCommand::Quit => break 'render,
             _ => {}

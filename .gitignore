@@ -1,3 +1,6 @@
 /target
 /assets
 *.ure
+flamegraph.svg
+perf.data
+perf.data.old

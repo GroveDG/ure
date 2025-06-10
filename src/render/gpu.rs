@@ -1,4 +1,8 @@
-use std::{pin::{pin, Pin}, task::{Context, RawWaker, RawWakerVTable, Waker}, time::Duration};
+use std::{
+    pin::{Pin, pin},
+    task::{Context, RawWaker, RawWakerVTable, Waker},
+    time::Duration,
+};
 
 use spin_sleep::SpinSleeper;
 use wgpu::{
@@ -6,9 +10,25 @@ use wgpu::{
     wgt::DeviceDescriptor,
 };
 
+use crate::game::tf::{Matrix2D, Precision};
+
 // [NOTE] https://www.reddit.com/r/opengl/comments/v5w80e/instancing_how_to_account_for_new_data_after/
 
-pub type Pixels = f32;
+pub struct Matrix2DGPU {
+    pub inner: [Precision; 12],
+}
+impl From<Matrix2D> for Matrix2DGPU {
+    fn from(value: Matrix2D) -> Self {
+        let array = value.to_cols_array();
+        Self {
+            inner: [
+                array[0], array[1], array[2], 0.0, array[3], array[4], array[5], 0.0, array[6],
+                array[7], array[8], 0.0,
+            ],
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Color {
@@ -95,4 +115,4 @@ pub trait BlockingFuture: Future + Sized {
     }
 }
 
-impl<F:Future + Sized> BlockingFuture for F {}
+impl<F: Future + Sized> BlockingFuture for F {}

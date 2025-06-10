@@ -1,8 +1,7 @@
 use std::sync::{mpsc::{Receiver, Sender}, Arc};
 
 use winit::{
-    event_loop::{EventLoopClosed, EventLoopProxy},
-    window::{Window, WindowAttributes},
+    dpi::PhysicalSize, event_loop::{EventLoopClosed, EventLoopProxy}, window::{Window, WindowAttributes}
 };
 
 use crate::{render::RenderCommand, sys::{delete::Delete, Components, UID}};
@@ -15,6 +14,7 @@ pub struct Windows {
     pub requested: u8,
     event_proxy: EventLoopProxy<UserEvent>,
     window_recv: Receiver<(UID, Window)>,
+    sizes: Components<PhysicalSize<u32>>
 }
 
 impl Windows {
@@ -27,6 +27,7 @@ impl Windows {
             requested: Default::default(),
             event_proxy,
             window_recv,
+            sizes: Default::default(),
         }
     }
     /// Request a new window component to be
@@ -53,6 +54,11 @@ impl Windows {
             self.windows.insert(uid, window.clone());
             let _ = render_sndr.send(RenderCommand::Window(window, uid));
         }
+    }
+    pub fn resized(&mut self) -> impl Iterator<Item = (&UID, &Arc<Window>)> {
+        self.windows.iter().filter(|(uid, window)| {
+            self.sizes.get(uid).is_none_or(|size| *size != window.inner_size())
+        })
     }
     pub fn is_empty(&self) -> bool {
         self.windows.is_empty() && self.requested == 0

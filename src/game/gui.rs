@@ -2,27 +2,25 @@
 //!
 //!
 
+use fontdue::layout::{Layout as TextLayout, LayoutSettings};
 use glam::{Mat3, Vec2};
 
 use crate::render::_2d::{Draw2D, Instance2D};
-use crate::render::gpu::{Color, Pixels};
+use crate::render::gpu::Color;
 use crate::sys::UIDs;
 use crate::sys::{Components, UID, delete::Delete};
 
-use super::{
-    tf::Precision,
-    tree::{DFSPost, Tree},
-};
+use super::{tf::Precision, tree::Tree};
 
-/// Layout is not Rendering, the two passes cannot happen at once.
-///
-#[derive(Debug)]
 pub struct Layout {
     tree: Tree,
     layout: Components<(Lay, Rect)>,
+    style: Components<Style>,
+    text: Components<Text>,
     quad: UID,
     instances: UID,
-    change: bool,
+    changed: bool,
+    text_layout: TextLayout,
 }
 
 impl Layout {
@@ -40,76 +38,141 @@ impl Layout {
         Self {
             tree: Default::default(),
             layout: Default::default(),
+            style: Default::default(),
+            text: Default::default(),
             quad,
             instances: uids.add(),
-            change: true,
+            changed: true,
+            text_layout: TextLayout::new(fontdue::layout::CoordinateSystem::PositiveYUp),
         }
     }
 
-    pub fn run(&mut self, draw_2d: &Draw2D) {
-        if !self.change {
-            return;
-        }
-
+    fn fit_sizing(&mut self, axis: usize) {
         for parent in self.tree.dfs_post() {
-            let (lay, out) = self.layout.get(parent).unwrap();
+            let (lay, _) = self.layout.get(parent).unwrap();
             let children = self.tree.get_children(Some(parent)).unwrap();
 
-            let (along_i, across_i) = match lay.direction {
-                Direction::Right => (0, 1),
-                Direction::Down => (1, 0),
-            };
-            let mut fit = [false, false];
-            let mut out_size: Vec2 = Vec2::ZERO;
+            let along = lay.direction.axis(axis);
+            let mut out_size = 0.0;
 
-            match lay.size.w.sizing {
-                Sizing::Fit => fit[0] = true,
-                Sizing::Fill => todo!(),
-                Sizing::Size(size) => match size {
-                    Size::Fixed(x) => out_size.x = x,
-                    _ => {}
-                },
-            }
-            match lay.size.h.sizing {
-                Sizing::Fit => fit[1] = true,
-                Sizing::Fill => todo!(),
-                Sizing::Size(size) => match size {
-                    Size::Fixed(y) => out_size.y = y,
-                    _ => {}
-                },
-            }
-
-            if fit[0] || fit[1] {
-                for (_, out) in children.iter().map(|child| self.layout.get(child).unwrap()) {
-                    if fit[along_i] {
-                        out_size[along_i] += out.size[along_i]
-                    }
-                    if fit[across_i] {
-                        out_size[across_i] += out.size[across_i]
+            match lay.size.axis(axis).sizing {
+                Sizing::Fit => {
+                    if along {
+                        for (_, out) in children.iter().map(|child| self.layout.get(child).unwrap())
+                        {
+                            out_size += out.size[axis];
+                        }
+                        out_size += children.len().saturating_sub(1) as f32 * lay.gap;
+                    } else {
+                        for (_, out) in children.iter().map(|child| self.layout.get(child).unwrap())
+                        {
+                            out_size += out_size.max(out.size[axis]);
+                        }
                     }
                 }
+                Sizing::Fill => {} // Seperate pass
+                Sizing::Size(size) => match size {
+                    Size::Fixed(v) => out_size = v,
+                    _ => {}
+                },
             }
 
             let (lay, out) = self.layout.get_mut(parent).unwrap();
 
-            out_size.x += lay.pad.left + lay.pad.right;
-            out_size.y += lay.pad.up + lay.pad.down;
+            out_size += lay.pad.size()[axis];
 
-            out.size = out_size;
+            out.size[axis] = out_size;
+        }
+    }
+
+    fn fill_sizing(&mut self, axis: usize) {
+        for parent in self.tree.bfs() {
+            let (lay, out) = self.layout.get(&parent).unwrap();
+
+            let Some(children) = self.tree.get_children(Some(&parent)) else {
+                continue;
+            };
+
+            let along = lay.direction.axis(axis);
+            let mut remaining = out.size[axis] - lay.pad.size()[axis];
+            if along {
+                remaining -= children.len().saturating_sub(1) as f32 * lay.gap;
+            }
+            let mut fill_children = Vec::with_capacity(children.len());
+            for child in children {
+                let (lay, out) = self.layout.get(child).unwrap();
+                if lay.size.axis(axis).sizing == Sizing::Fill {
+                    fill_children.push(child);
+                }
+                remaining -= out.size[axis];
+            }
+
+            if along && !fill_children.is_empty() {
+                while remaining > 0.0 {
+                    let mut smallest = f32::INFINITY;
+                    let mut next_smallest = f32::INFINITY;
+                    let mut add_width = remaining;
+                    for child in fill_children.iter().copied() {
+                        let (_, out) = self.layout.get_mut(child).unwrap();
+                        if out.size[axis] < smallest {
+                            next_smallest = smallest;
+                            smallest = out.size[axis];
+                        } else {
+                            next_smallest = next_smallest.min(out.size[axis]);
+                            add_width = next_smallest - smallest;
+                        }
+                        out.size[axis] = remaining / fill_children.len() as f32;
+                    }
+                    // Clamp added width
+                    add_width = add_width.min(remaining / fill_children.len() as f32);
+                    for child in fill_children.iter().copied() {
+                        let (_, out) = self.layout.get_mut(child).unwrap();
+                        if out.size[axis] == smallest {
+                            out.size[axis] += add_width;
+                            remaining -= add_width;
+                        }
+                    }
+                }
+            } else {
+                for child in fill_children {
+                    let (_, out) = self.layout.get_mut(child).unwrap();
+                    out.size[axis] += (remaining - out.size[axis]).max(0.0);
+                }
+            }
+        }
+    }
+
+    pub fn run(&mut self, draw_2d: &Draw2D) {
+        if !self.changed {
+            return;
         }
 
-        let instances: Vec<_> = self
-            .tree
-            .dfs_pre()
-            .filter_map(|uid| self.layout.get(uid))
-            .map(|(lay, out)| Instance2D {
-                tf: Mat3::from_scale_angle_translation(out.size, 0.0, out.pos + out.size / 2.0),
-                color: Color::WHITE,
-            })
-            .collect();
+        // Fit Sizing Widths
+        self.fit_sizing(0);
+
+        // Fill Sizing Widths
+        self.fill_sizing(0);
+
+        // Fit Sizing Heights
+        self.fit_sizing(1);
+
+        // Fill Sizing Heights
+        self.fill_sizing(1);
+
+        let mut instances = Vec::new();
+        for uid in self.tree.dfs_pre() {
+            let Some(style) = self.style.get(uid) else {
+                continue;
+            };
+            let (_, out) = self.layout.get(uid).unwrap();
+            let tf = Mat3::from_scale_angle_translation(out.size, 0.0, out.pos);
+            if let Some(color) = style.color {
+                instances.push(Instance2D { tf, color });
+            }
+        }
         draw_2d.update_instances(self.instances, instances);
 
-        self.change = false;
+        self.changed = false;
     }
 
     pub fn draw(&self, draw_2d: &Draw2D) {
@@ -118,31 +181,47 @@ impl Layout {
         draw_2d.draw();
     }
 
-    pub fn insert(&mut self, uid: UID, lay: Lay, parent: Option<UID>, index: Option<usize>) {
+    pub fn insert(
+        &mut self,
+        uid: UID,
+        lay: Lay,
+        style: Option<Style>,
+        text: Option<Text>,
+        parent: Option<UID>,
+        index: Option<usize>,
+    ) {
         self.layout.insert(uid, (lay, Default::default()));
+        if let Some(style) = style {
+            self.style.insert(uid, style);
+        }
+        if let Some(text) = text {
+            self.text.insert(uid, text);
+        }
         self.tree.parent(uid, parent, index);
-        self.change = true;
+        self.changed = true;
     }
 
     pub fn get_mut(&mut self, uid: &UID) -> Option<&mut Lay> {
-        self.change = true;
+        self.changed = true;
         self.layout.get_mut(uid).map(|layout| &mut layout.0)
     }
 }
 impl Delete for Layout {
     fn delete(&mut self, uid: &UID) {
         self.layout.remove(uid);
+        self.style.remove(uid);
+        self.text.remove(uid);
         self.tree.delete(uid);
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Size {
-    Fixed(Pixels),
+    Fixed(f32),
     Percent(Precision),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Sizing {
     /// Fit all children
     Fit,
@@ -164,13 +243,30 @@ pub struct BoxSize {
     pub w: AxisSize,
     pub h: AxisSize,
 }
+impl BoxSize {
+    pub fn axis(&self, axis: usize) -> AxisSize {
+        match axis {
+            0 => self.w,
+            1 => self.h,
+            _ => unreachable!(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Pad {
-    pub up: Pixels,
-    pub down: Pixels,
-    pub left: Pixels,
-    pub right: Pixels,
+    pub up: f32,
+    pub down: f32,
+    pub left: f32,
+    pub right: f32,
+}
+impl Pad {
+    pub fn size(&self) -> Vec2 {
+        Vec2 {
+            x: self.left + self.right,
+            y: self.up + self.down,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -180,6 +276,12 @@ pub enum Align {
     Right,
 }
 
+#[derive(Debug, Clone)]
+pub struct Text {
+    pub align: Align,
+    pub text: String,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Direction {
     /// Left to right
@@ -187,27 +289,33 @@ pub enum Direction {
     /// Top to bottom
     Down,
 }
+impl Direction {
+    pub fn axis(self, axis: usize) -> bool {
+        match self {
+            Self::Right => axis == 0,
+            Self::Down => axis == 1,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Lay {
     pub size: BoxSize,
     pub pad: Pad,
-    pub gap: Pixels,
-    pub align: Align,
+    pub gap: f32,
     pub direction: Direction,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Border {
-    width: Pixels,
-    color: Color,
+pub struct Style {
+    pub color: Option<Color>,
+    pub border: Option<Border>,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Style {
-    pub color: Color,
-    pub radius: Option<Pixels>,
-    pub border: Option<Border>,
+pub struct Border {
+    width: f32,
+    color: Color,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -233,20 +341,29 @@ impl Default for Lay {
             },
             pad: Default::default(),
             gap: 0.0,
-            align: Align::Left,
             direction: Direction::Down,
         }
     }
 }
 impl Lay {
-    pub fn fix_w(&mut self, w: Pixels) {
+    pub fn fix_w(&mut self, w: f32) {
         self.size.w.sizing = Sizing::Size(Size::Fixed(w));
     }
-    pub fn fix_h(&mut self, h: Pixels) {
+    pub fn fix_h(&mut self, h: f32) {
         self.size.h.sizing = Sizing::Size(Size::Fixed(h));
     }
-    pub fn fix_size(&mut self, w: Pixels, h: Pixels) {
+    pub fn fix_size(&mut self, w: f32, h: f32) {
         self.fix_w(w);
         self.fix_h(h);
+    }
+    pub fn fill_w(&mut self) {
+        self.size.w.sizing = Sizing::Fill;
+    }
+    pub fn fill_h(&mut self) {
+        self.size.h.sizing = Sizing::Fill;
+    }
+    pub fn fill(&mut self) {
+        self.fill_w();
+        self.fill_h();
     }
 }

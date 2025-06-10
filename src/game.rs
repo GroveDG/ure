@@ -7,20 +7,26 @@ use std::{
     time::Instant,
 };
 
+use glam::Vec2;
 use parking_lot::Mutex;
 use winit::{
     event_loop::EventLoopProxy,
     window::{Window, WindowAttributes},
 };
 
-use crate::{game::gui::Lay, sys::{delete::DeleteQueue, UIDs}};
-use crate::{app::window::Windows, sys::UID};
+use crate::{
+    app::window::Windows,
+    game::gui::{Style, Text},
+    render::gpu::Color,
+    sys::UID,
+};
 use crate::{
     app::{UserEvent, input::Input},
-    render::{
-        _2d::Draw2D,
-        RenderCommand,
-    },
+    render::{_2d::Draw2D, RenderCommand},
+};
+use crate::{
+    game::gui::Lay,
+    sys::{UIDs, delete::DeleteQueue},
 };
 
 use self::gui::Layout;
@@ -54,17 +60,34 @@ pub fn game(
     let mut layout = Layout::new(quad, &mut uids);
 
     // [USEFUL] Initialize Game Systems
-    let mut tree = Tree::default();
     let mut space = Space2D::default();
 
     // [USEFUL] Init Root
     let root = uids.add();
-    // tree.parent(root, None, None);
-    space.insert(root, Matrix2D::IDENTITY);
-    layout.insert(root, Lay::default(), None, None);
+    // space.insert(root, Matrix2D::IDENTITY, None, None);
+    layout.insert(root, Lay::default(), None, None, None, None);
     let _ = windows.request(
         root,
         WindowAttributes::default().with_title("Untitled Rust Engine"),
+    );
+
+    //[EXAMPLE]
+    let tray = uids.add();
+    let mut lay = Lay::default();
+    lay.fix_size(100.0, 100.0);
+    layout.insert(
+        tray,
+        lay,
+        Some(Style {
+            color: Some(Color::BLUE),
+            border: None,
+        }),
+        Some(Text {
+            align: gui::Align::Left,
+            text: "Bobos".to_string(),
+        }),
+        Some(root),
+        None,
     );
 
     // [VITAL] Frame Timing
@@ -113,11 +136,21 @@ pub fn game(
             if windows.is_empty() {
                 break 'game;
             }
-            for (uid, window) in windows.windows.iter() {
+            for (uid, window) in windows.resized() {
+                let size = window.inner_size();
+                let width = size.width as f32;
+                let height = size.height as f32;
                 if let Some(lay) = layout.get_mut(uid) {
-                    let size = window.inner_size();
-                    lay.fix_size(size.width as f32, size.height as f32);
+                    lay.fix_size(width, height);
                 }
+                draw_2d.update_camera(
+                    *uid,
+                    Matrix2D::from_scale(Vec2 {
+                        x: width / 2.,
+                        y: height / 2.,
+                    })
+                    .inverse(),
+                );
             }
         });
 
@@ -131,18 +164,21 @@ pub fn game(
         // RENDER
         // ================================================================================================================
 
-        // [VITAL] Apply Delete to Render Thread
-        for uid in delete.iter() {
-            let _ = render.send(RenderCommand::Delete(*uid));
+        for (&window, _) in windows.windows.iter() {
+            // [VITAL] Apply Delete to Render Thread
+            for uid in delete.iter() {
+                let _ = render.send(RenderCommand::Delete(*uid));
+            }
+
+            let _ = render.send(RenderCommand::Pass(window));
+
+            // [EXAMPLE] Render Example Quad
+            run!(draw_2d, {
+                draw_2d.camera(window);
+                draw_2d.start();
+                layout.draw(&draw_2d);
+            });
         }
-
-        let _ = render.send(RenderCommand::Pass(root));
-
-        // [EXAMPLE] Render Example Quad
-        run!(draw_2d, {
-            draw_2d.start();
-            layout.draw(&draw_2d);
-        });
 
         // [VITAL] Submit Rendering to GPU
         let _ = render.send(RenderCommand::Submit);

@@ -2,12 +2,15 @@ use std::sync::mpsc::Sender;
 
 use glam::Vec2;
 use wgpu::{
-    util::DeviceExt, BindGroup, BindGroupLayoutDescriptor, Buffer, BufferUsages, FilterMode, FragmentState, MultisampleState, PipelineCompilationOptions, RenderPipeline, RenderPipelineDescriptor, VertexAttribute, VertexBufferLayout, VertexState
+    BindGroup, BindGroupLayout, BindGroupLayoutDescriptor, Buffer, BufferUsages, FilterMode,
+    FragmentState, MultisampleState, PipelineCompilationOptions, RenderPipeline,
+    RenderPipelineDescriptor, VertexAttribute, VertexBufferLayout, VertexState, util::DeviceExt,
 };
 
 use crate::{
     game::tf::Matrix2D,
-    sys::{Components, UID, UIDs, delete::Delete},
+    render::{gpu::Matrix2DGPU, BindResource},
+    sys::{delete::Delete, Components, UIDs, UID},
 };
 
 use super::{
@@ -75,56 +78,40 @@ impl Instance2D {
 pub struct Draw2D {
     render_sndr: Sender<RenderCommand>,
     meshes: Components<(UID, UID)>,
-    pub camera: Matrix2D,
+    cameras: Components<Matrix2D>,
 }
 impl Draw2D {
-    pub fn pipeline(gpu: &GPU) -> RenderPipeline {
+    pub fn pipeline(gpu: &GPU) -> (RenderPipeline, BindGroupLayout) {
         let shader = gpu
             .device
             .create_shader_module(wgpu::include_wgsl!("2d.wgsl"));
 
-        // let camera_layout = gpu
-        //     .device
-        //     .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        //         entries: &[wgpu::BindGroupLayoutEntry {
-        //             binding: 0,
-        //             visibility: wgpu::ShaderStages::VERTEX,
-        //             ty: wgpu::BindingType::Buffer {
-        //                 ty: wgpu::BufferBindingType::Uniform,
-        //                 has_dynamic_offset: false,
-        //                 min_binding_size: None,
-        //             },
-        //             count: None,
-        //         }],
-        //         label: None,
-        //     });
-
-        // let camera_buffer = gpu.device.create_buffer_init(
-        //     &wgpu::util::BufferInitDescriptor {
-        //         label: Some("Camera Buffer"),
-        //         contents: bytemuck::cast_slice(&[Matrix2D::IDENTITY]),
-        //         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        //     }
-        // );
-
-        // let camera_bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-        //     layout: &camera_layout,
-        //     entries: &[wgpu::BindGroupEntry {
-        //         binding: 0,
-        //         resource: camera_buffer.as_entire_binding(),
-        //     }],
-        //     label: Some("camera_bind_group"),
-        // });
+        let camera_layout = gpu
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: None,
+            });
 
         let layout = gpu
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
-                bind_group_layouts: &[],
+                bind_group_layouts: &[&camera_layout],
                 push_constant_ranges: &[],
             });
 
-        gpu.device
+        let pipeline = gpu
+            .device
             .create_render_pipeline(&RenderPipelineDescriptor {
                 label: None,
                 layout: Some(&layout),
@@ -161,13 +148,14 @@ impl Draw2D {
                 },
                 multiview: None,
                 cache: None,
-            })
+            });
+        (pipeline, camera_layout)
     }
     pub fn new(render_sndr: Sender<RenderCommand>) -> Self {
         Self {
             render_sndr,
             meshes: Default::default(),
-            camera: Matrix2D::IDENTITY,
+            cameras: Default::default(),
         }
     }
     pub fn primitives(&mut self, uids: &mut UIDs) -> (UID,) {
@@ -207,6 +195,19 @@ impl Draw2D {
         );
         (quad,)
     }
+    pub fn update_camera(&mut self, camera: UID, tf: Matrix2D) {
+        // Add padding to Mat3x3 https://github.com/gfx-rs/wgpu-rs/issues/36
+        let _ = self.render_sndr.send(RenderCommand::Buffer(
+            camera,
+            bytemuck::cast_slice(&Matrix2DGPU::from(tf).inner).to_vec(),
+            BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        ));
+        let _ = self.render_sndr.send(RenderCommand::Bind(
+            camera,
+            super::BindLayout::_2DCam,
+            vec![(0, BindResource::Buffer(camera))],
+        ));
+    }
     pub fn update_mesh(&mut self, uid: UID, uids: &mut UIDs, mesh: Mesh2D) {
         if !self.meshes.contains_key(&uid) {
             let vertex = uids.add();
@@ -239,6 +240,9 @@ impl Draw2D {
         let _ = self
             .render_sndr
             .send(RenderCommand::Pipeline(super::Pipelines::_2D));
+    }
+    pub fn camera(&self, camera: UID) {
+        let _ = self.render_sndr.send(RenderCommand::Bound(0, camera));
     }
     pub fn mesh(&self, uid: UID) {
         let (vertex, index) = self.meshes.get(&uid).copied().unwrap();

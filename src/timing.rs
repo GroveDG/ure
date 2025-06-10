@@ -31,8 +31,9 @@ pub fn timing(
             if game.is_finished() {
                 let _ = game.join();
                 // Request render thread quit.
-                let _ = render_sndr.send(RenderCommand::Quit);
-                let _ = render.join();
+                if render_sndr.send(RenderCommand::Quit).is_ok() {
+                    let _ = render.join();
+                }
                 // Request app thread quit.
                 let _ = event_proxy.send_event(UserEvent::Exit);
                 return;
@@ -41,11 +42,11 @@ pub fn timing(
 
         // Resume threads.
         game.thread().unpark();
-        render.thread().unpark();
 
         // Calculate Remaining Time in Frame
         let elapsed = start.elapsed();
         let remaining = FRAME_PERIOD.saturating_sub(elapsed);
+        // println!("{:?}", remaining);
         // [VITAL] Sleep For Remaining Time
         timer.sleep(remaining);
     }

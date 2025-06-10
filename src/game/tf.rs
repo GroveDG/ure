@@ -1,23 +1,26 @@
-use crate::sys::{Components, UID, delete::Delete};
+use crate::{game::tree::Tree, sys::{delete::Delete, Components, UID}};
 
 
 
 pub type Precision = f32;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Space<M> {
-    transforms: Components<M>,
+    pub transforms: Components<M>,
+    pub tree: Tree,
 }
 impl<M> Default for Space<M> {
     fn default() -> Self {
         Self {
             transforms: Default::default(),
+            tree: Default::default(),
         }
     }
 }
 impl<M> Space<M> {
-    pub fn insert(&mut self, uid: UID, matrix: M) {
+    pub fn insert(&mut self, uid: UID, matrix: M, parent: Option<UID>, index: Option<usize>) {
         self.transforms.insert(uid, matrix);
+        self.tree.parent(uid, parent, index);
     }
 }
 impl<M> Delete for Space<M> {

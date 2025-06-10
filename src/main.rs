@@ -35,6 +35,7 @@ mod game;
 mod render;
 mod sys;
 mod timing;
+mod editor;
 
 fn main() {
     // [VITAL] Initialize App

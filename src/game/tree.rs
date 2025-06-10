@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use crate::sys::{Components, UID, delete::Delete};
 
 #[derive(Debug, Default)]
@@ -76,6 +78,9 @@ impl Tree {
     pub fn dfs_pre(&self) -> DFSPre {
         DFSPre::new(self)
     }
+    pub fn bfs(&self) -> BFS {
+        BFS::new(self)
+    }
 }
 
 impl Delete for Tree {
@@ -132,6 +137,37 @@ impl<'a> Iterator for DFSPost<'a> {
             *i += 1;
             self.descend();
             break child;
+        })
+    }
+}
+
+pub struct BFS<'a> {
+    tree: &'a Tree,
+    stack: VecDeque<UID>,
+}
+impl<'a> BFS<'a> {
+    fn new(tree: &'a Tree) -> Self {
+        Self {
+            tree,
+            stack: tree.roots.clone().into(),
+        }
+    }
+}
+impl<'a> Iterator for BFS<'a> {
+    type Item = UID;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(loop {
+            let Some(node) = self.stack.pop_front() else {
+                return None;
+            };
+            if let Some(children) = self.tree.get_children(Some(&node)) {
+                self.stack.reserve(children.len());
+                for child in children {
+                    self.stack.push_front(*child);
+                }
+            }
+            break node;
         })
     }
 }

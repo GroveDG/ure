@@ -1,5 +1,8 @@
 // Vertex shader
 
+@group(0) @binding(0)
+var<uniform> camera: mat3x3<f32>;
+
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) color: vec4<f32>,
@@ -28,7 +31,7 @@ fn vertex(
         instance.row1,
         instance.row2,
     );
-    out.clip_position = (transform * vec3<f32>(vertex.position.x, vertex.position.y, 1.0)).xyzz;
+    out.clip_position = (camera * transform * vec3<f32>(vertex.position.x, vertex.position.y, 1.0)).xyzz;
     out.color = vertex.color * instance.color;
     return out;
 }

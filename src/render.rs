@@ -21,7 +21,11 @@ use std::{
 
 use _2d::Draw2D;
 use wgpu::{
-    util::{BufferInitDescriptor, DeviceExt}, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, Buffer, BufferUsages, Color, RenderPass, RenderPipeline, Surface, SurfaceConfiguration, SurfaceTexture
+    BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, Buffer, BufferUsages, Color,
+    RenderPass, RenderPipeline, Surface, SurfaceConfiguration, SurfaceTexture, Texture,
+    TextureFormat,
+    util::{BufferInitDescriptor, DeviceExt},
+    wgt::{TextureDataOrder, TextureDescriptor},
 };
 use winit::window::Window;
 
@@ -59,6 +63,12 @@ pub enum RenderCommand {
     Delete(UID),
     Window(Arc<Window>, UID),
     Bind(UID, BindLayout, Vec<(u32, BindResource)>),
+    Texture(
+        UID,
+        TextureDescriptor<(), Vec<TextureFormat>>,
+        TextureDataOrder,
+        Vec<u8>,
+    ),
     // Draw
     Pass(UID),
     Pipeline(Pipelines),
@@ -87,6 +97,7 @@ pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
     let gpu = GPU::new().block();
 
     let mut surfaces: Components<(Surface, Arc<Window>)> = Default::default();
+    let mut textures: Components<Texture> = Default::default();
     let mut buffers: Components<Buffer> = Default::default();
     let mut bind_groups: Components<BindGroup> = Default::default();
     let (pipelines, bind_layouts) = {
@@ -106,7 +117,8 @@ pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
                 &mut buffers,
                 &mut surfaces,
                 &mut bind_groups,
-                &bind_layouts
+                &bind_layouts,
+                &mut textures,
             ) {
                 command = c;
                 break;
@@ -131,16 +143,18 @@ pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
             };
 
             // If Window was not commanded, next surface.
-            let Some(surface_texture) = surface_textures.get(&uid) else {
+            let texture = if let Some(surface_texture) = surface_textures.get(&uid) {
+                &surface_texture.texture
+            } else if let Some(texture) = textures.get(&uid) {
+                texture
+            } else {
                 command = commands.recv().unwrap();
                 continue 'surfaces;
             };
-            let view = surface_texture
-                .texture
-                .create_view(&wgpu::TextureViewDescriptor {
-                    format: Some(SURFACE_FORMAT),
-                    ..Default::default()
-                });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor {
+                format: Some(SURFACE_FORMAT),
+                ..Default::default()
+            });
 
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
@@ -177,7 +191,7 @@ pub fn render(commands: Receiver<RenderCommand>, parker: &Sender<()>) {
                 }
             }
         }
-        
+
         match command {
             RenderCommand::Submit => {
                 // [VITAL] Signal End of Frame
@@ -201,7 +215,8 @@ fn update(
     buffers: &mut Components<Buffer>,
     surfaces: &mut Components<(Surface, Arc<Window>)>,
     bind_groups: &mut Components<BindGroup>,
-    bind_layouts: &[BindGroupLayout]
+    bind_layouts: &[BindGroupLayout],
+    textures: &mut Components<Texture>,
 ) -> Option<RenderCommand> {
     match command {
         RenderCommand::Buffer(uid, data, usage) => {
@@ -269,6 +284,23 @@ fn update(
                         .collect::<Vec<_>>(),
                 }),
             );
+        }
+        RenderCommand::Texture(uid, descriptor, order, data) => {
+            textures.insert(uid, gpu.device.create_texture_with_data(
+                &gpu.queue,
+                &TextureDescriptor {
+                    label: None,
+                    size: descriptor.size,
+                    mip_level_count: descriptor.mip_level_count,
+                    sample_count: descriptor.sample_count,
+                    dimension: descriptor.dimension,
+                    format: descriptor.format,
+                    usage: descriptor.usage,
+                    view_formats: &descriptor.view_formats,
+                },
+                order,
+                &data,
+            ));
         }
         _ => return Some(command),
     }

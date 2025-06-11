@@ -3,7 +3,7 @@ use std::sync::{Arc, mpsc::Receiver};
 use wgpu::{Device, Instance, Surface, wgt::SurfaceConfiguration};
 use winit::{
     dpi::PhysicalSize,
-    event_loop::{EventLoopClosed, EventLoopProxy},
+    event_loop::EventLoopProxy,
     window::{Window, WindowAttributes},
 };
 

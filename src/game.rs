@@ -15,7 +15,7 @@ use winit::{
 use crate::{
     app::window::Windows,
     game::gui::{Style, Text},
-    render::{BlockingFuture, Color, new_gpu},
+    render::Color,
     sys::{Components, Uid},
 };
 use crate::{
@@ -28,7 +28,7 @@ use crate::{
 };
 
 use self::gui::Layout;
-use self::tf::{Matrix2D, Space2D};
+use self::tf::Matrix2D;
 
 pub mod assets;
 pub mod gui;

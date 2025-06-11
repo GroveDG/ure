@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 bimap = "0.6.3"
 bytemuck = "1.23.0"
+color = { version = "0.3.1", features = ["bytemuck"] }
 fontdue = "0.9.3"
 glam = { version = "0.30.3", features = ["bytemuck"] }
 nohash-hasher = "0.2.0"

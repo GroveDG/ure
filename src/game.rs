@@ -15,7 +15,7 @@ use winit::{
 use crate::{
     app::window::Windows,
     game::gui::{Style, Text},
-    render::Color,
+    render::{Color, GpuColor},
     sys::{Components, Uid},
 };
 use crate::{
@@ -42,7 +42,7 @@ pub fn game(
     event_proxy: EventLoopProxy<UserEvent>,
     window_recv: Receiver<(Uid, Window)>,
     input: Arc<Mutex<Input>>,
-    gpu: &(wgpu::Instance, wgpu::Device, wgpu::Queue)
+    gpu: &(wgpu::Instance, wgpu::Device, wgpu::Queue),
 ) {
     // [CORE] Initialize UID System
     let mut uids = UIDs::new();
@@ -75,7 +75,7 @@ pub fn game(
         tray,
         lay,
         Some(Style {
-            color: Some(Color::BLUE),
+            color: Some(Color::WHITE),
             border: None,
         }),
         Some(Text {
@@ -193,7 +193,7 @@ pub fn game(
                     resolve_target: None,
                     ops: wgpu::Operations {
                         // [USEFUL] Clear Surface
-                        load: wgpu::LoadOp::Clear(Color::WHITE.into()),
+                        load: wgpu::LoadOp::Clear(Color::BLACK.to_gpu()),
                         store: wgpu::StoreOp::Store,
                     },
                 })],

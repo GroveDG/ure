@@ -1,10 +1,12 @@
 use std::{
-    task::{Context, RawWaker, RawWakerVTable, Waker}, time::Duration
+    task::{Context, RawWaker, RawWakerVTable, Waker},
+    time::Duration,
 };
 
+use color::{AlphaColor, Srgb};
 use spin_sleep::SpinSleeper;
 use wgpu::{
-    wgt::DeviceDescriptor, Device, Instance, InstanceDescriptor, Queue, RequestAdapterOptions
+    Device, Instance, InstanceDescriptor, Queue, RequestAdapterOptions, wgt::DeviceDescriptor,
 };
 
 use crate::game::tf::{Matrix2D, Precision};
@@ -28,36 +30,18 @@ impl From<Matrix2D> for Matrix2DGPU {
     }
 }
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Color {
-    r: f32,
-    g: f32,
-    b: f32,
-    a: f32,
+pub type Color = AlphaColor<Srgb>;
+pub trait GpuColor {
+    fn to_gpu(self) -> wgpu::Color;
 }
-#[allow(dead_code)]
-impl Color {
-    pub const WHITE: Self = Color {
-        r: 1.,
-        g: 1.,
-        b: 1.,
-        a: 1.,
-    };
-    pub const BLUE: Self = Color {
-        r: 0.,
-        g: 0.,
-        b: 1.,
-        a: 1.,
-    };
-}
-impl From<Color> for wgpu::Color {
-    fn from(value: Color) -> Self {
-        Self {
-            r: value.r as f64,
-            g: value.g as f64,
-            b: value.b as f64,
-            a: value.a as f64,
+impl GpuColor for Color {
+    fn to_gpu(self) -> wgpu::Color {
+        let components = self.components;
+        wgpu::Color {
+            r: components[0] as f64,
+            g: components[1] as f64,
+            b: components[2] as f64,
+            a: components[3] as f64,
         }
     }
 }

@@ -245,7 +245,7 @@ impl<'a> Draw2DUpdate<'a> {
             });
             let index = self.device.create_buffer_init(&BufferInitDescriptor {
                 label: None,
-                contents: vertex_bytes,
+                contents: index_bytes,
                 usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
             });
             self.draw_2d.meshes.insert(uid, (vertex, index));

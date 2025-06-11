@@ -4,7 +4,7 @@ use std::{
 
 use spin_sleep::SpinSleeper;
 use wgpu::{
-    wgt::DeviceDescriptor, Adapter, Device, Instance, InstanceDescriptor, Queue, RequestAdapterOptions
+    wgt::DeviceDescriptor, Device, Instance, InstanceDescriptor, Queue, RequestAdapterOptions
 };
 
 use crate::game::tf::{Matrix2D, Precision};

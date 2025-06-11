@@ -1,21 +1,21 @@
 use std::collections::VecDeque;
 
-use crate::sys::{Components, UID, delete::Delete};
+use crate::sys::{Components, Uid, delete::Delete};
 
 #[derive(Debug, Default)]
 pub struct Tree {
     nodes: Components<Node>,
-    roots: Vec<UID>,
+    roots: Vec<Uid>,
 }
 
 #[derive(Debug)]
 pub struct Node {
-    parent: Option<UID>,
-    children: Vec<UID>,
+    parent: Option<Uid>,
+    children: Vec<Uid>,
 }
 
 impl Tree {
-    pub fn parent(&mut self, child: UID, parent: Option<UID>, index: Option<usize>) {
+    pub fn parent(&mut self, child: Uid, parent: Option<Uid>, index: Option<usize>) {
         if let Some(child_node) = self.nodes.get_mut(&child) {
             let prev_parent = child_node.parent;
             child_node.parent = parent;
@@ -46,14 +46,14 @@ impl Tree {
             siblings.push(child);
         }
     }
-    pub fn get_children(&self, parent: Option<&UID>) -> Option<&Vec<UID>> {
+    pub fn get_children(&self, parent: Option<&Uid>) -> Option<&Vec<Uid>> {
         if let Some(parent) = parent {
             self.nodes.get(parent).map(|parent| &parent.children)
         } else {
             Some(&self.roots)
         }
     }
-    fn get_children_mut(&mut self, parent: Option<&UID>) -> Option<&mut Vec<UID>> {
+    fn get_children_mut(&mut self, parent: Option<&Uid>) -> Option<&mut Vec<Uid>> {
         if let Some(parent) = parent {
             self.nodes
                 .get_mut(parent)
@@ -62,14 +62,14 @@ impl Tree {
             Some(&mut self.roots)
         }
     }
-    pub fn get_child(&self, parent: Option<&UID>, index: usize) -> Option<&UID> {
+    pub fn get_child(&self, parent: Option<&Uid>, index: usize) -> Option<&Uid> {
         self.get_children(parent)
             .and_then(|children| children.get(index))
     }
     pub fn nodes(&self) -> &Components<Node> {
         &self.nodes
     }
-    pub fn roots(&self) -> &Vec<UID> {
+    pub fn roots(&self) -> &Vec<Uid> {
         &self.roots
     }
     pub fn dfs_post(&self) -> DFSPost {
@@ -84,7 +84,7 @@ impl Tree {
 }
 
 impl Delete for Tree {
-    fn delete(&mut self, uid: &UID) {
+    fn delete(&mut self, uid: &Uid) {
         let Some(node) = self.nodes.remove(uid) else {
             return;
         };
@@ -100,7 +100,7 @@ impl Delete for Tree {
 
 pub struct DFSPost<'a> {
     tree: &'a Tree,
-    stack: Vec<(Option<UID>, usize)>,
+    stack: Vec<(Option<Uid>, usize)>,
 }
 impl<'a> DFSPost<'a> {
     fn new(tree: &'a Tree) -> Self {
@@ -123,13 +123,11 @@ impl<'a> DFSPost<'a> {
     }
 }
 impl<'a> Iterator for DFSPost<'a> {
-    type Item = &'a UID;
+    type Item = &'a Uid;
 
     fn next(&mut self) -> Option<Self::Item> {
         Some(loop {
-            let Some((parent, i)) = self.stack.last_mut() else {
-                return None;
-            };
+            let (parent, i) = self.stack.last_mut()?;
             let Some(child) = self.tree.get_child(parent.as_ref(), *i) else {
                 self.stack.pop();
                 continue;
@@ -143,7 +141,7 @@ impl<'a> Iterator for DFSPost<'a> {
 
 pub struct BFS<'a> {
     tree: &'a Tree,
-    stack: VecDeque<UID>,
+    stack: VecDeque<Uid>,
 }
 impl<'a> BFS<'a> {
     fn new(tree: &'a Tree) -> Self {
@@ -154,27 +152,25 @@ impl<'a> BFS<'a> {
     }
 }
 impl<'a> Iterator for BFS<'a> {
-    type Item = UID;
+    type Item = Uid;
 
     fn next(&mut self) -> Option<Self::Item> {
-        Some(loop {
-            let Some(node) = self.stack.pop_front() else {
-                return None;
-            };
-            if let Some(children) = self.tree.get_children(Some(&node)) {
-                self.stack.reserve(children.len());
-                for child in children {
-                    self.stack.push_front(*child);
-                }
+        let Some(node) = self.stack.pop_front() else {
+            return None;
+        };
+        if let Some(children) = self.tree.get_children(Some(&node)) {
+            self.stack.reserve(children.len());
+            for child in children {
+                self.stack.push_front(*child);
             }
-            break node;
-        })
+        }
+        Some(node)
     }
 }
 
 pub struct DFSPre<'a> {
     tree: &'a Tree,
-    stack: Vec<(Option<UID>, usize)>,
+    stack: Vec<(Option<Uid>, usize)>,
 }
 impl<'a> DFSPre<'a> {
     fn new(tree: &'a Tree) -> Self {
@@ -185,7 +181,7 @@ impl<'a> DFSPre<'a> {
     }
 }
 impl<'a> Iterator for DFSPre<'a> {
-    type Item = &'a UID;
+    type Item = &'a Uid;
 
     fn next(&mut self) -> Option<Self::Item> {
         Some(loop {

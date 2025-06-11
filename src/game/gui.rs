@@ -8,7 +8,7 @@ use glam::{Mat3, Vec2};
 use crate::render::_2d::{Draw2DPass, Draw2DUpdate, Instance2D};
 use crate::render::Color;
 use crate::sys::UIDs;
-use crate::sys::{Components, UID, delete::Delete};
+use crate::sys::{Components, Uid, delete::Delete};
 
 use super::{tf::Precision, tree::Tree};
 
@@ -17,8 +17,8 @@ pub struct Layout {
     layout: Components<(Lay, Rect)>,
     style: Components<Style>,
     text: Components<Text>,
-    quad: UID,
-    instances: UID,
+    quad: Uid,
+    instances: Uid,
     changed: bool,
     text_layout: TextLayout,
 }
@@ -34,7 +34,7 @@ impl Layout {
     7. Draw
     https://youtu.be/by9lQvpvMIc */
 
-    pub fn new(quad: UID, uids: &mut UIDs) -> Self {
+    pub fn new(quad: Uid, uids: &mut UIDs) -> Self {
         Self {
             tree: Default::default(),
             layout: Default::default(),
@@ -183,11 +183,11 @@ impl Layout {
 
     pub fn insert(
         &mut self,
-        uid: UID,
+        uid: Uid,
         lay: Lay,
         style: Option<Style>,
         text: Option<Text>,
-        parent: Option<UID>,
+        parent: Option<Uid>,
         index: Option<usize>,
     ) {
         self.layout.insert(uid, (lay, Default::default()));
@@ -201,13 +201,13 @@ impl Layout {
         self.changed = true;
     }
 
-    pub fn get_mut(&mut self, uid: &UID) -> Option<&mut Lay> {
+    pub fn get_mut(&mut self, uid: &Uid) -> Option<&mut Lay> {
         self.changed = true;
         self.layout.get_mut(uid).map(|layout| &mut layout.0)
     }
 }
 impl Delete for Layout {
-    fn delete(&mut self, uid: &UID) {
+    fn delete(&mut self, uid: &Uid) {
         self.layout.remove(uid);
         self.style.remove(uid);
         self.text.remove(uid);

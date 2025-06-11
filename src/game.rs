@@ -16,7 +16,7 @@ use crate::{
     app::window::Windows,
     game::gui::{Style, Text},
     render::{BlockingFuture, Color, new_gpu},
-    sys::{Components, UID},
+    sys::{Components, Uid},
 };
 use crate::{
     app::{UserEvent, input::Input},
@@ -40,7 +40,7 @@ pub const FRAME_TIME: Duration = Duration::new(0, 016_666_667);
 
 pub fn game(
     event_proxy: EventLoopProxy<UserEvent>,
-    window_recv: Receiver<(UID, Window)>,
+    window_recv: Receiver<(Uid, Window)>,
     input: Arc<Mutex<Input>>,
     gpu: &(wgpu::Instance, wgpu::Device, wgpu::Queue)
 ) {
@@ -58,9 +58,6 @@ pub fn game(
 
     // [USEFUL] Initialize UI Systems
     let mut layout = Layout::new(quad, &mut uids);
-
-    // [USEFUL] Initialize Game Systems
-    let mut space = Space2D::default();
 
     // [USEFUL] Init Root
     let root = uids.add();
@@ -208,7 +205,7 @@ pub fn game(
             // [EXAMPLE] Render Example Quad
             run!(draw_2d, {
                 let mut pass = draw_2d.pass(&mut pass);
-                pass.camera(&uid);
+                pass.camera(*uid);
                 layout.draw(&mut pass);
             });
         }

@@ -11,7 +11,7 @@ use wgpu::{
 use crate::{
     game::{SURFACE_FORMAT, tf::Matrix2D},
     render::Matrix2DGPU,
-    sys::{Components, UID, UIDs, delete::Delete},
+    sys::{Components, Uid, UIDs, delete::Delete},
 };
 
 use super::Color;
@@ -149,7 +149,7 @@ impl Draw2D {
             camera_layout,
         }
     }
-    pub fn primitives(&mut self, uids: &mut UIDs, device: &Device, queue: &Queue) -> (UID,) {
+    pub fn primitives(&mut self, uids: &mut UIDs, device: &Device, queue: &Queue) -> (Uid,) {
         let quad = uids.add();
         let mut update = self.update(device, queue);
         update.mesh(
@@ -208,7 +208,7 @@ impl<'a> Draw2DUpdate<'a> {
             queue,
         }
     }
-    pub fn camera(&mut self, camera: UID, tf: Matrix2D) {
+    pub fn camera(&mut self, camera: Uid, tf: Matrix2D) {
         // Add padding to Mat3x3 https://github.com/gfx-rs/wgpu-rs/issues/36
         let tfgpu = Matrix2DGPU::from(tf);
         let bytes = bytemuck::cast_slice(&tfgpu.inner);
@@ -231,7 +231,7 @@ impl<'a> Draw2DUpdate<'a> {
             self.draw_2d.cameras.insert(camera, (bind, buffer));
         }
     }
-    pub fn mesh(&mut self, uid: UID, mesh: Mesh2D) {
+    pub fn mesh(&mut self, uid: Uid, mesh: Mesh2D) {
         let vertex_bytes = bytemuck::cast_slice(&mesh.vertex);
         let index_bytes = bytemuck::cast_slice(&mesh.index);
         if let Some((vertex, index)) = self.draw_2d.meshes.get(&uid) {
@@ -251,7 +251,7 @@ impl<'a> Draw2DUpdate<'a> {
             self.draw_2d.meshes.insert(uid, (vertex, index));
         }
     }
-    pub fn instances(&mut self, uid: UID, instances: Vec<Instance2D>) {
+    pub fn instances(&mut self, uid: Uid, instances: Vec<Instance2D>) {
         let bytes = bytemuck::cast_slice(&instances);
         if let Some(buffer) = self.draw_2d.instances.get(&uid) {
             self.queue.write_buffer(buffer, 0, bytes);
@@ -281,11 +281,11 @@ impl<'a, 'b> Draw2DPass<'a, 'b> {
             instances_slice: 0..0,
         }
     }
-    pub fn camera(&mut self, camera: &UID) {
+    pub fn camera(&mut self, camera: Uid) {
         self.pass
-            .set_bind_group(0, &self.draw_2d.cameras.get(camera).unwrap().0, &[]);
+            .set_bind_group(0, &self.draw_2d.cameras.get(&camera).unwrap().0, &[]);
     }
-    pub fn mesh(&mut self, uid: UID) {
+    pub fn mesh(&mut self, uid: Uid) {
         let (vertex, index) = self.draw_2d.meshes.get(&uid).unwrap();
 
         self.pass
@@ -293,7 +293,7 @@ impl<'a, 'b> Draw2DPass<'a, 'b> {
         self.pass.set_vertex_buffer(0, vertex.slice(..));
         self.index_slice = 0..(index.size() / 2) as u32;
     }
-    pub fn instances(&mut self, uid: UID) {
+    pub fn instances(&mut self, uid: Uid) {
         let instances = self.draw_2d.instances.get(&uid).unwrap();
 
         self.pass.set_vertex_buffer(1, instances.slice(..));
@@ -306,7 +306,7 @@ impl<'a, 'b> Draw2DPass<'a, 'b> {
 }
 
 impl Delete for Draw2D {
-    fn delete(&mut self, uid: &UID) {
+    fn delete(&mut self, uid: &Uid) {
         self.cameras.remove(uid);
         self.meshes.remove(uid);
         self.instances.remove(uid);

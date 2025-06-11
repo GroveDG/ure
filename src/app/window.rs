@@ -9,7 +9,7 @@ use winit::{
 
 use crate::{
     game::SURFACE_FORMAT,
-    sys::{Components, UID, delete::Delete},
+    sys::{Components, Uid, delete::Delete},
 };
 
 use super::UserEvent;
@@ -19,14 +19,14 @@ pub struct Windows<'a> {
     pub windows: Components<(Arc<Window>, Surface<'a>)>,
     pub requested: u8,
     event_proxy: EventLoopProxy<UserEvent>,
-    window_recv: Receiver<(UID, Window)>,
+    window_recv: Receiver<(Uid, Window)>,
     sizes: Components<PhysicalSize<u32>>,
 }
 
 impl<'a> Windows<'a> {
     pub fn new(
         event_proxy: EventLoopProxy<UserEvent>,
-        window_recv: Receiver<(UID, Window)>,
+        window_recv: Receiver<(Uid, Window)>,
     ) -> Self {
         Self {
             windows: Default::default(),
@@ -47,11 +47,11 @@ impl<'a> Windows<'a> {
     /// send the resulting window back.
     pub fn request(
         &mut self,
-        uid: UID,
+        uid: Uid,
         attr: WindowAttributes,
-    ) -> Result<(), EventLoopClosed<UserEvent>> {
+    ) {
         self.requested += 1;
-        self.event_proxy.send_event(UserEvent::NewWindow(uid, attr))
+        let _ = self.event_proxy.send_event(UserEvent::NewWindow(uid, Box::new(attr)));
     }
     pub fn receive(&mut self, instance: &Instance, device: &Device) {
         for (uid, window) in self.window_recv.try_iter() {
@@ -80,7 +80,7 @@ impl<'a> Windows<'a> {
     }
 }
 impl<'a> Delete for Windows<'a> {
-    fn delete(&mut self, uid: &UID) {
+    fn delete(&mut self, uid: &Uid) {
         self.windows.remove(uid);
         self.sizes.remove(uid);
     }

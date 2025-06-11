@@ -1,4 +1,4 @@
-use crate::{game::tree::Tree, sys::{delete::Delete, Components, UID}};
+use crate::{game::tree::Tree, sys::{delete::Delete, Components, Uid}};
 
 
 
@@ -18,13 +18,13 @@ impl<M> Default for Space<M> {
     }
 }
 impl<M> Space<M> {
-    pub fn insert(&mut self, uid: UID, matrix: M, parent: Option<UID>, index: Option<usize>) {
+    pub fn insert(&mut self, uid: Uid, matrix: M, parent: Option<Uid>, index: Option<usize>) {
         self.transforms.insert(uid, matrix);
         self.tree.parent(uid, parent, index);
     }
 }
 impl<M> Delete for Space<M> {
-    fn delete(&mut self, uid: &UID) {
+    fn delete(&mut self, uid: &Uid) {
         self.transforms.remove(uid);
     }
 }

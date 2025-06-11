@@ -8,7 +8,7 @@ use winit::{
     window::{Window, WindowAttributes, WindowId},
 };
 
-use crate::sys::{BiComponents, UID};
+use crate::sys::{BiComponents, Uid};
 
 use self::input::Input;
 
@@ -18,13 +18,13 @@ pub mod window;
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum UserEvent {
-    NewWindow(UID, WindowAttributes),
+    NewWindow(Uid, Box<WindowAttributes>),
     Exit,
 }
 
 pub struct App {
     pub window_ids: BiComponents<WindowId>,
-    pub window_sndr: Sender<(UID, Window)>,
+    pub window_sndr: Sender<(Uid, Window)>,
     pub input: Arc<Mutex<Input>>,
 }
 
@@ -53,14 +53,13 @@ impl ApplicationHandler<UserEvent> for App {
         match event {
             UserEvent::NewWindow(uid, attr) => {
                 let window = event_loop
-                    .create_window(attr)
+                    .create_window(*attr)
                     .expect("Window creation failed. See winit::event_loop::ActiveEventLoop.");
                 self.window_ids.insert(uid, window.id());
                 let _ = self.window_sndr.send((uid, window));
             }
             UserEvent::Exit => {
                 event_loop.exit();
-                return;
             }
         }
     }

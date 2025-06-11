@@ -11,11 +11,11 @@ use self::delete::Delete;
 
 pub mod delete;
 
-pub type Entities = HashSet<UID, BuildNoHashHasher<u64>>;
-pub type Components<C> = HashMap<UID, C, BuildNoHashHasher<u64>>;
-pub type BiComponents<C> = BiHashMap<UID, C, BuildNoHashHasher<u64>>;
+pub type Entities = HashSet<Uid, BuildNoHashHasher<u64>>;
+pub type Components<C> = HashMap<Uid, C, BuildNoHashHasher<u64>>;
+pub type BiComponents<C> = BiHashMap<Uid, C, BuildNoHashHasher<u64>>;
 
-pub type UID = u64;
+pub type Uid = u64;
 
 #[derive(Debug, Clone)]
 pub struct UIDs {
@@ -30,7 +30,7 @@ impl UIDs {
         }
     }
 
-    pub fn add(&mut self) -> UID {
+    pub fn add(&mut self) -> Uid {
         let uid = self.rng.next_u64();
         while !self.ids.insert(uid) {}
         uid
@@ -38,7 +38,7 @@ impl UIDs {
 }
 
 impl Delete for UIDs {
-    fn delete(&mut self, uid: &UID) {
+    fn delete(&mut self, uid: &Uid) {
         self.ids.remove(uid);
     }
 }

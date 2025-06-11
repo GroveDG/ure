@@ -49,7 +49,7 @@ impl Assets {
             stdout.read_to_string(&mut working)?;
             working
         } else {
-            return io::Result::Err(io::Error::new(io::ErrorKind::Other, "Buffer missing"));
+            return io::Result::Err(io::Error::other("Buffer missing"));
         };
 
         // If the output does not look like a hash, return Err.

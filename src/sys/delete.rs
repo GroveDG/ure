@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use super::UID;
+use super::Uid;
 
 /// Starting at the beginning of the previous frame
 /// we delete all UIDs queued. This prevents skipping
@@ -24,14 +24,14 @@ use super::UID;
 ///
 #[derive(Debug, Default)]
 pub struct DeleteQueue {
-    queue: [HashSet<UID>; 2],
+    queue: [HashSet<Uid>; 2],
 }
 
 impl DeleteQueue {
-    fn queue(&mut self, uid: UID) {
+    fn queue(&mut self, uid: Uid) {
         self.queue[1].insert(uid);
     }
-    pub fn delete(&mut self, system: &mut dyn Delete, uid: UID) {
+    pub fn delete(&mut self, system: &mut dyn Delete, uid: Uid) {
         system.delete(&uid);
         self.queue(uid);
     }
@@ -44,11 +44,11 @@ impl DeleteQueue {
             system.delete(uid);
         }
     }
-    pub fn iter(&self) -> impl Iterator<Item = &UID> {
+    pub fn iter(&self) -> impl Iterator<Item = &Uid> {
         self.queue[0].iter().chain(self.queue[1].iter())
     }
 }
 
 pub trait Delete {
-    fn delete(&mut self, uid: &UID);
+    fn delete(&mut self, uid: &Uid);
 }

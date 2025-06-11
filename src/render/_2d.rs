@@ -1,22 +1,20 @@
-use std::sync::mpsc::Sender;
+use std::{ops::Range, sync::Arc};
 
 use glam::Vec2;
 use wgpu::{
-    BindGroup, BindGroupLayout, BindGroupLayoutDescriptor, Buffer, BufferUsages, FilterMode,
-    FragmentState, MultisampleState, PipelineCompilationOptions, RenderPipeline,
-    RenderPipelineDescriptor, VertexAttribute, VertexBufferLayout, VertexState, util::DeviceExt,
+    BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, Buffer, BufferUsages, Device,
+    FilterMode, FragmentState, MultisampleState, PipelineCompilationOptions, Queue, RenderPass,
+    RenderPipeline, RenderPipelineDescriptor, VertexAttribute, VertexBufferLayout, VertexState,
+    util::{BufferInitDescriptor, DeviceExt},
 };
 
 use crate::{
-    game::tf::Matrix2D,
-    render::{gpu::Matrix2DGPU, BindResource},
-    sys::{delete::Delete, Components, UIDs, UID},
+    game::{SURFACE_FORMAT, tf::Matrix2D},
+    render::Matrix2DGPU,
+    sys::{Components, UID, UIDs, delete::Delete},
 };
 
-use super::{
-    RenderCommand, SURFACE_FORMAT,
-    gpu::{Color, GPU},
-};
+use super::Color;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, PartialEq)]
@@ -76,93 +74,86 @@ impl Instance2D {
 }
 
 pub struct Draw2D {
-    render_sndr: Sender<RenderCommand>,
-    meshes: Components<(UID, UID)>,
-    cameras: Components<Matrix2D>,
+    meshes: Components<(Buffer, Buffer)>,
+    instances: Components<Buffer>,
+    cameras: Components<(BindGroup, Buffer)>,
+    pipeline: RenderPipeline,
+    camera_layout: BindGroupLayout,
 }
 impl Draw2D {
-    pub fn pipeline(gpu: &GPU) -> (RenderPipeline, BindGroupLayout) {
-        let shader = gpu
-            .device
-            .create_shader_module(wgpu::include_wgsl!("2d.wgsl"));
+    pub fn new(device: &Device) -> Self {
+        let shader = device.create_shader_module(wgpu::include_wgsl!("2d.wgsl"));
 
-        let camera_layout = gpu
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: None,
-            });
+        let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+            label: None,
+        });
 
-        let layout = gpu
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: None,
-                bind_group_layouts: &[&camera_layout],
-                push_constant_ranges: &[],
-            });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[&camera_layout],
+            push_constant_ranges: &[],
+        });
 
-        let pipeline = gpu
-            .device
-            .create_render_pipeline(&RenderPipelineDescriptor {
-                label: None,
-                layout: Some(&layout),
-                vertex: VertexState {
-                    module: &shader,
-                    entry_point: Some("vertex"),
-                    compilation_options: PipelineCompilationOptions::default(),
-                    buffers: &[Vertex2D::LAYOUT, Instance2D::LAYOUT],
-                },
-                fragment: Some(FragmentState {
-                    module: &shader,
-                    entry_point: Some("fragment"),
-                    compilation_options: PipelineCompilationOptions::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: SURFACE_FORMAT,
-                        blend: Some(wgpu::BlendState::REPLACE),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: Some(wgpu::Face::Back),
-                    unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    conservative: false,
-                },
-                depth_stencil: None,
-                multisample: MultisampleState {
-                    count: 1,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview: None,
-                cache: None,
-            });
-        (pipeline, camera_layout)
-    }
-    pub fn new(render_sndr: Sender<RenderCommand>) -> Self {
+        let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+            label: None,
+            layout: Some(&layout),
+            vertex: VertexState {
+                module: &shader,
+                entry_point: Some("vertex"),
+                compilation_options: PipelineCompilationOptions::default(),
+                buffers: &[Vertex2D::LAYOUT, Instance2D::LAYOUT],
+            },
+            fragment: Some(FragmentState {
+                module: &shader,
+                entry_point: Some("fragment"),
+                compilation_options: PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: SURFACE_FORMAT,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
         Self {
-            render_sndr,
             meshes: Default::default(),
+            instances: Default::default(),
             cameras: Default::default(),
+            pipeline,
+            camera_layout,
         }
     }
-    pub fn primitives(&mut self, uids: &mut UIDs) -> (UID,) {
+    pub fn primitives(&mut self, uids: &mut UIDs, device: &Device, queue: &Queue) -> (UID,) {
         let quad = uids.add();
-        self.update_mesh(
+        let mut update = self.update(device, queue);
+        update.mesh(
             quad,
-            uids,
             Mesh2D {
                 vertex: vec![
                     Vertex2D {
@@ -195,80 +186,129 @@ impl Draw2D {
         );
         (quad,)
     }
-    pub fn update_camera(&mut self, camera: UID, tf: Matrix2D) {
-        // Add padding to Mat3x3 https://github.com/gfx-rs/wgpu-rs/issues/36
-        let _ = self.render_sndr.send(RenderCommand::Buffer(
-            camera,
-            bytemuck::cast_slice(&Matrix2DGPU::from(tf).inner).to_vec(),
-            BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-        ));
-        let _ = self.render_sndr.send(RenderCommand::Bind(
-            camera,
-            super::BindLayout::_2DCam,
-            vec![(0, BindResource::Buffer(camera))],
-        ));
+    pub fn update<'a>(&'a mut self, device: &'a Device, queue: &'a Queue) -> Draw2DUpdate<'a> {
+        Draw2DUpdate::new(self, device, queue)
     }
-    pub fn update_mesh(&mut self, uid: UID, uids: &mut UIDs, mesh: Mesh2D) {
-        if !self.meshes.contains_key(&uid) {
-            let vertex = uids.add();
-            let index = uids.add();
+    pub fn pass<'a, 'b>(&'a self, pass: &'a mut RenderPass<'b>) -> Draw2DPass<'a, 'b> {
+        pass.set_pipeline(&self.pipeline);
+        Draw2DPass::new(self, pass)
+    }
+}
 
-            self.meshes.insert(uid, (vertex, index));
+pub struct Draw2DUpdate<'a> {
+    draw_2d: &'a mut Draw2D,
+    device: &'a Device,
+    queue: &'a Queue,
+}
+impl<'a> Draw2DUpdate<'a> {
+    pub fn new(draw_2d: &'a mut Draw2D, device: &'a Device, queue: &'a Queue) -> Self {
+        Self {
+            draw_2d,
+            device,
+            queue,
         }
+    }
+    pub fn camera(&mut self, camera: UID, tf: Matrix2D) {
+        // Add padding to Mat3x3 https://github.com/gfx-rs/wgpu-rs/issues/36
+        let tfgpu = Matrix2DGPU::from(tf);
+        let bytes = bytemuck::cast_slice(&tfgpu.inner);
+        if let Some((_, buffer)) = self.draw_2d.cameras.get(&camera) {
+            self.queue.write_buffer(buffer, 0, bytes);
+        } else {
+            let buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+                label: None,
+                contents: bytes,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            });
+            let bind = self.device.create_bind_group(&BindGroupDescriptor {
+                label: None,
+                layout: &self.draw_2d.camera_layout,
+                entries: &[BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
+                }],
+            });
+            self.draw_2d.cameras.insert(camera, (bind, buffer));
+        }
+    }
+    pub fn mesh(&mut self, uid: UID, mesh: Mesh2D) {
+        let vertex_bytes = bytemuck::cast_slice(&mesh.vertex);
+        let index_bytes = bytemuck::cast_slice(&mesh.index);
+        if let Some((vertex, index)) = self.draw_2d.meshes.get(&uid) {
+            self.queue.write_buffer(vertex, 0, vertex_bytes);
+            self.queue.write_buffer(index, 0, index_bytes);
+        } else {
+            let vertex = self.device.create_buffer_init(&BufferInitDescriptor {
+                label: None,
+                contents: vertex_bytes,
+                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+            });
+            let index = self.device.create_buffer_init(&BufferInitDescriptor {
+                label: None,
+                contents: vertex_bytes,
+                usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
+            });
+            self.draw_2d.meshes.insert(uid, (vertex, index));
+        }
+    }
+    pub fn instances(&mut self, uid: UID, instances: Vec<Instance2D>) {
+        let bytes = bytemuck::cast_slice(&instances);
+        if let Some(buffer) = self.draw_2d.instances.get(&uid) {
+            self.queue.write_buffer(buffer, 0, bytes);
+        } else {
+            let buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+                label: None,
+                contents: bytes,
+                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+            });
+            self.draw_2d.instances.insert(uid, buffer);
+        }
+    }
+}
 
-        let (vertex, index) = self.meshes.get(&uid).copied().unwrap();
+pub struct Draw2DPass<'a, 'b> {
+    draw_2d: &'a Draw2D,
+    pass: &'a mut RenderPass<'b>,
+    index_slice: Range<u32>,
+    instances_slice: Range<u32>,
+}
+impl<'a, 'b> Draw2DPass<'a, 'b> {
+    pub fn new(draw_2d: &'a Draw2D, pass: &'a mut RenderPass<'b>) -> Self {
+        Self {
+            draw_2d,
+            pass,
+            index_slice: 0..0,
+            instances_slice: 0..0,
+        }
+    }
+    pub fn camera(&mut self, camera: &UID) {
+        self.pass
+            .set_bind_group(0, &self.draw_2d.cameras.get(camera).unwrap().0, &[]);
+    }
+    pub fn mesh(&mut self, uid: UID) {
+        let (vertex, index) = self.draw_2d.meshes.get(&uid).unwrap();
 
-        let _ = self.render_sndr.send(RenderCommand::Buffer(
-            vertex,
-            bytemuck::cast_slice(&mesh.vertex).to_vec(),
-            BufferUsages::VERTEX | BufferUsages::COPY_DST,
-        ));
-        let _ = self.render_sndr.send(RenderCommand::Buffer(
-            index,
-            bytemuck::cast_slice(&mesh.index).to_vec(),
-            BufferUsages::INDEX | BufferUsages::COPY_DST,
-        ));
+        self.pass
+            .set_index_buffer(index.slice(..), wgpu::IndexFormat::Uint16);
+        self.pass.set_vertex_buffer(0, vertex.slice(..));
+        self.index_slice = 0..(index.size() / 2) as u32;
     }
-    pub fn update_instances(&self, uid: UID, instances: Vec<Instance2D>) {
-        let _ = self.render_sndr.send(RenderCommand::Buffer(
-            uid,
-            bytemuck::cast_slice(&instances).to_vec(),
-            BufferUsages::VERTEX | BufferUsages::COPY_DST,
-        ));
+    pub fn instances(&mut self, uid: UID) {
+        let instances = self.draw_2d.instances.get(&uid).unwrap();
+
+        self.pass.set_vertex_buffer(1, instances.slice(..));
+        self.instances_slice = 0..(instances.size() / (size_of::<Instance2D>() as u64)) as u32;
     }
-    pub fn start(&self) {
-        let _ = self
-            .render_sndr
-            .send(RenderCommand::Pipeline(super::Pipelines::_2D));
-    }
-    pub fn camera(&self, camera: UID) {
-        let _ = self.render_sndr.send(RenderCommand::Bound(0, camera));
-    }
-    pub fn mesh(&self, uid: UID) {
-        let (vertex, index) = self.meshes.get(&uid).copied().unwrap();
-        let _ = self
-            .render_sndr
-            .send(RenderCommand::Vertex(0, vertex, None));
-        let _ = self.render_sndr.send(RenderCommand::Index(index));
-    }
-    pub fn instances(&self, uid: UID) {
-        let _ = self.render_sndr.send(RenderCommand::Vertex(
-            1,
-            uid,
-            Some(size_of::<Instance2D>() as u64),
-        ));
-    }
-    pub fn draw(&self) {
-        let _ = self.render_sndr.send(RenderCommand::Draw);
+    pub fn draw(&mut self) {
+        self.pass
+            .draw_indexed(self.index_slice.clone(), 0, self.instances_slice.clone());
     }
 }
 
 impl Delete for Draw2D {
     fn delete(&mut self, uid: &UID) {
-        let Some((vertex, index)) = self.meshes.get(uid).copied() else {
-            return;
-        };
-        let _ = self.render_sndr.send(RenderCommand::Delete(vertex));
-        let _ = self.render_sndr.send(RenderCommand::Delete(index));
+        self.cameras.remove(uid);
+        self.meshes.remove(uid);
+        self.instances.remove(uid);
     }
 }

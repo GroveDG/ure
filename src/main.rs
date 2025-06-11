@@ -28,13 +28,12 @@ use std::{
 use parking_lot::Mutex;
 use winit::event_loop::EventLoop;
 
-use crate::app::{App, input::Input};
+use crate::{app::{input::Input, App}, render::{new_gpu, BlockingFuture}};
 
 mod app;
 mod game;
 mod render;
 mod sys;
-mod timing;
 mod editor;
 
 fn main() {
@@ -47,44 +46,22 @@ fn main() {
     let (window_sndr, window_recv) = channel();
     let input = Arc::new(Mutex::new(Input::default()));
 
-    // [VITAL] Initialize Thread Communication
-    let (render_sndr, render_recv) = channel();
-    let (parker, parked) = channel();
-
-    // [VITAL] Initialize Render Thread
-    let render = {
-        let parker = parker.clone();
-        thread::Builder::new()
-            .name("render".to_string())
-            .spawn(move || {
-                render::render(render_recv, &parker);
-                let _ = parker.send(());
-                println!("RENDER THREAD QUIT");
-            })
-            .unwrap()
-    };
-
     // [VITAL] Initialize Game Thread
     let game = {
         let event_proxy = event_loop.create_proxy();
         let input = Arc::clone(&input);
-        let render_sndr = render_sndr.clone();
+        let gpu = new_gpu().block();
 
         thread::Builder::new()
             .name("game".to_string())
             .spawn(move || {
-                game::game(event_proxy, window_recv, input, render_sndr, &parker);
-                let _ = parker.send(());
+                game::game(event_proxy, window_recv, input, &gpu);
                 println!("GAME THREAD QUIT");
+                std::mem::drop(gpu.2);
+                std::mem::drop(gpu.0);
+                std::mem::drop(gpu.1);
             })
             .unwrap()
-    };
-
-    // [VITAL] Time Frames in Game and Render Threads
-    let timing = {
-        let event_proxy = event_loop.create_proxy();
-
-        thread::spawn(move || timing::timing(parked, game, render, render_sndr, event_proxy))
     };
 
     // [VITAL] Run App
@@ -98,5 +75,5 @@ fn main() {
     println!("APP THREAD QUIT");
 
     // [VITAL] Prevent Dangling Threads
-    let _ = timing.join();
+    let _ = game.join();
 }

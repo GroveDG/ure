@@ -2,11 +2,11 @@
 //!
 //!
 
-use fontdue::layout::{Layout as TextLayout, LayoutSettings};
+use fontdue::layout::Layout as TextLayout;
 use glam::{Mat3, Vec2};
 
-use crate::render::_2d::{Draw2D, Instance2D};
-use crate::render::gpu::Color;
+use crate::render::_2d::{Draw2DPass, Draw2DUpdate, Instance2D};
+use crate::render::Color;
 use crate::sys::UIDs;
 use crate::sys::{Components, UID, delete::Delete};
 
@@ -142,7 +142,7 @@ impl Layout {
         }
     }
 
-    pub fn run(&mut self, draw_2d: &Draw2D) {
+    pub fn run(&mut self, draw_2d: &mut Draw2DUpdate) {
         if !self.changed {
             return;
         }
@@ -170,12 +170,12 @@ impl Layout {
                 instances.push(Instance2D { tf, color });
             }
         }
-        draw_2d.update_instances(self.instances, instances);
+        draw_2d.instances(self.instances, instances);
 
         self.changed = false;
     }
 
-    pub fn draw(&self, draw_2d: &Draw2D) {
+    pub fn draw(&self, draw_2d: &mut Draw2DPass) {
         draw_2d.mesh(self.quad);
         draw_2d.instances(self.instances);
         draw_2d.draw();

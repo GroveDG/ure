@@ -81,10 +81,7 @@ impl<'a> Windows<'a> {
 }
 impl<'a> Delete for Windows<'a> {
     fn delete(&mut self, uid: &UID) {
-        if let Some((window, surface)) = self.windows.remove(uid) {
-            std::mem::drop(surface);
-            std::mem::drop(window);
-        }
+        self.windows.remove(uid);
         self.sizes.remove(uid);
     }
 }

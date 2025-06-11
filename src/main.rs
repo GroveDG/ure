@@ -57,9 +57,9 @@ fn main() {
             .spawn(move || {
                 game::game(event_proxy, window_recv, input, &gpu);
                 println!("GAME THREAD QUIT");
-                std::mem::drop(gpu.2);
-                std::mem::drop(gpu.0);
-                std::mem::drop(gpu.1);
+                // Seg fault on "terminate display" in drivers because... idk
+                // forgetting solves this although at what cost I can't be sure.
+                std::mem::forget(gpu.0);
             })
             .unwrap()
     };

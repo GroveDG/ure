@@ -4,7 +4,7 @@ use std::{
 
 use spin_sleep::SpinSleeper;
 use wgpu::{
-    Device, Instance, InstanceDescriptor, Queue, RequestAdapterOptions, wgt::DeviceDescriptor,
+    wgt::DeviceDescriptor, Adapter, Device, Instance, InstanceDescriptor, Queue, RequestAdapterOptions
 };
 
 use crate::game::tf::{Matrix2D, Precision};
@@ -62,7 +62,7 @@ impl From<Color> for wgpu::Color {
     }
 }
 
-pub async fn new_gpu() -> (Device, Queue, Instance) {
+pub async fn new_gpu() -> (Instance, Device, Queue) {
     let instance = Instance::new(&InstanceDescriptor::from_env_or_default());
     let adapter = instance
         .request_adapter(&RequestAdapterOptions::default())
@@ -72,7 +72,7 @@ pub async fn new_gpu() -> (Device, Queue, Instance) {
         .request_device(&DeviceDescriptor::default())
         .await
         .unwrap();
-    (device, queue, instance)
+    (instance, device, queue)
 }
 
 // https://users.rust-lang.org/t/simplest-possible-block-on/48364

@@ -42,7 +42,7 @@ pub fn game(
     event_proxy: EventLoopProxy<UserEvent>,
     window_recv: Receiver<(UID, Window)>,
     input: Arc<Mutex<Input>>,
-    gpu: &(wgpu::Device, wgpu::Queue, wgpu::Instance)
+    gpu: &(wgpu::Instance, wgpu::Device, wgpu::Queue)
 ) {
     // [CORE] Initialize UID System
     let mut uids = UIDs::new();
@@ -51,7 +51,7 @@ pub fn game(
     let mut delete = DeleteQueue::default();
 
     // [VITAL] Initialize Render Systems
-    let (device, queue, instance) = gpu;
+    let (instance, device, queue) = gpu;
     let mut windows = Windows::new(event_proxy.clone(), window_recv);
     let mut draw_2d = Draw2D::new(device);
     let (quad,) = draw_2d.primitives(&mut uids, device, queue);

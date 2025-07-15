@@ -66,12 +66,6 @@ impl Tree {
         self.get_children(parent)
             .and_then(|children| children.get(index))
     }
-    pub fn nodes(&self) -> &Components<Node> {
-        &self.nodes
-    }
-    pub fn roots(&self) -> &Vec<Uid> {
-        &self.roots
-    }
     pub fn dfs_post(&self) -> DFSPost {
         DFSPost::new(self)
     }

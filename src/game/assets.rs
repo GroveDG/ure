@@ -5,7 +5,7 @@ use std::{
 
 // use serde::{Deserialize, Serialize};
 
-use crate::sys::{BiComponents, UIDs};
+use crate::sys::{BiComponents, Uids};
 
 
 
@@ -34,7 +34,7 @@ impl Assets {
     /// Uses git to poll file differences and register them.
     ///
     /// For my money, this is the best idea I've ever had.
-    pub fn poll(&mut self, uids: &mut UIDs) -> io::Result<()> {
+    pub fn poll(&mut self, uids: &mut Uids) -> io::Result<()> {
         // Create a tree object from the working tree
         // This allows us to git diff without committing
         let working = if let Some(mut stdout) = Command::new("git")

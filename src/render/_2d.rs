@@ -11,7 +11,7 @@ use wgpu::{
 use crate::{
     game::{SURFACE_FORMAT, tf::Matrix2D},
     render::Matrix2DGPU,
-    sys::{Components, Uid, UIDs, delete::Delete},
+    sys::{Components, Uid, Uids, delete::Delete},
 };
 
 use super::Color;
@@ -149,7 +149,7 @@ impl Draw2D {
             camera_layout,
         }
     }
-    pub fn primitives(&mut self, uids: &mut UIDs, device: &Device, queue: &Queue) -> (Uid,) {
+    pub fn primitives(&mut self, uids: &mut Uids, device: &Device, queue: &Queue) -> (Uid,) {
         let quad = uids.add();
         let mut update = self.update(device, queue);
         update.mesh(

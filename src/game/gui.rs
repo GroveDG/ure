@@ -7,7 +7,7 @@ use glam::{Mat3, Vec2};
 
 use crate::render::_2d::{Draw2DPass, Draw2DUpdate, Instance2D};
 use crate::render::Color;
-use crate::sys::UIDs;
+use crate::sys::Uids;
 use crate::sys::{Components, Uid, delete::Delete};
 
 use super::{tf::Precision, tree::Tree};
@@ -34,7 +34,7 @@ impl Layout {
     7. Draw
     https://youtu.be/by9lQvpvMIc */
 
-    pub fn new(quad: Uid, uids: &mut UIDs) -> Self {
+    pub fn new(quad: Uid, uids: &mut Uids) -> Self {
         Self {
             tree: Default::default(),
             layout: Default::default(),

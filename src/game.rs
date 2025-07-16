@@ -24,7 +24,7 @@ use crate::{
 };
 use crate::{
     game::gui::Lay,
-    sys::{UIDs, delete::DeleteQueue},
+    sys::{Uids, delete::DeleteQueue},
 };
 
 use self::gui::Layout;
@@ -45,7 +45,7 @@ pub fn game(
     gpu: &(wgpu::Instance, wgpu::Device, wgpu::Queue),
 ) {
     // [CORE] Initialize UID System
-    let mut uids = UIDs::new();
+    let mut uids = Uids::new();
 
     // [VITAL] Initialize Delete System
     let mut delete = DeleteQueue::default();

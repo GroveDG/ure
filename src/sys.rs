@@ -18,11 +18,11 @@ pub type BiComponents<C> = BiHashMap<Uid, C, BuildNoHashHasher<u64>>;
 pub type Uid = u64;
 
 #[derive(Debug, Clone)]
-pub struct UIDs {
+pub struct Uids {
     ids: Entities,
     rng: ThreadRng,
 }
-impl UIDs {
+impl Uids {
     pub fn new() -> Self {
         Self {
             ids: Default::default(),
@@ -37,7 +37,7 @@ impl UIDs {
     }
 }
 
-impl Delete for UIDs {
+impl Delete for Uids {
     fn delete(&mut self, uid: &Uid) {
         self.ids.remove(uid);
     }

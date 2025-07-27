@@ -1,14 +1,18 @@
-use std::sync::{mpsc::Sender, Arc};
+use std::{
+    sync::{
+        Arc,
+        mpsc::{Receiver, Sender, channel},
+    },
+    thread::{JoinHandle, Thread, spawn},
+};
 
 use parking_lot::Mutex;
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
     event_loop::ActiveEventLoop,
-    window::{Window, WindowAttributes, WindowId},
+    window::{Window, WindowAttributes},
 };
-
-use crate::sys::{BiComponents, Uid};
 
 use self::input::Input;
 
@@ -18,18 +22,32 @@ pub mod window;
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum UserEvent {
-    NewWindow(Uid, Box<WindowAttributes>),
+    NewWindow(WindowAttributes),
     Exit,
 }
 
-pub struct App {
-    pub window_ids: BiComponents<WindowId>,
-    pub window_sndr: Sender<(Uid, Window)>,
-    pub input: Arc<Mutex<Input>>,
+pub trait Game: Send + 'static {
+    fn new(event_loop: &ActiveEventLoop) -> Self;
+    fn start(self);
 }
 
-impl ApplicationHandler<UserEvent> for App {
-    fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
+pub struct App<G: Game> {
+    input: Arc<Mutex<Input>>,
+    game: Option<JoinHandle<()>>,
+}
+
+impl<G: Game> App<G> {
+    pub fn new() -> Self {
+        let input = Arc::new(Mutex::new(Input::default()));
+        Self { input, game: None }
+    }
+}
+
+impl<G: Game> ApplicationHandler<UserEvent> for App<G> {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        let game = G::new(event_loop);
+        self.game = Some(spawn(|| game.start()))
+    }
 
     fn window_event(
         &mut self,
@@ -51,16 +69,22 @@ impl ApplicationHandler<UserEvent> for App {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
-            UserEvent::NewWindow(uid, attr) => {
+            UserEvent::NewWindow(attr) => {
                 let window = event_loop
                     .create_window(*attr)
                     .expect("Window creation failed. See winit::event_loop::ActiveEventLoop.");
                 self.window_ids.insert(uid, window.id());
-                let _ = self.window_sndr.send((uid, window));
+                let _ = self.window_send.send((uid, window));
             }
             UserEvent::Exit => {
                 event_loop.exit();
             }
+        }
+    }
+
+    fn exiting(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(game) = self.game.take() {
+            _ = game.join();
         }
     }
 }

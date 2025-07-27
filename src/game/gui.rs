@@ -5,8 +5,8 @@
 use fontdue::layout::Layout as TextLayout;
 use glam::{Mat3, Vec2};
 
-use crate::render::_2d::{Draw2DPass, Draw2DUpdate, Instance2D};
-use crate::render::Color;
+use crate::game::tf::Space2D;
+use crate::render::_2d::Draw2DPass;
 use crate::sys::Uids;
 use crate::sys::{Components, Uid, delete::Delete};
 
@@ -15,7 +15,6 @@ use super::{tf::Precision, tree::Tree};
 pub struct Layout {
     tree: Tree,
     layout: Components<(Lay, Rect)>,
-    style: Components<Style>,
     text: Components<Text>,
     quad: Uid,
     instances: Uid,
@@ -38,7 +37,6 @@ impl Layout {
         Self {
             tree: Default::default(),
             layout: Default::default(),
-            style: Default::default(),
             text: Default::default(),
             quad,
             instances: uids.add(),
@@ -142,7 +140,7 @@ impl Layout {
         }
     }
 
-    pub fn run(&mut self, draw_2d: &mut Draw2DUpdate) {
+    pub fn run(&mut self, space_2d: &mut Space2D) {
         if !self.changed {
             return;
         }
@@ -159,18 +157,10 @@ impl Layout {
         // Fill Sizing Heights
         self.fill_sizing(1);
 
-        let mut instances = Vec::new();
         for uid in self.tree.dfs_pre() {
-            let Some(style) = self.style.get(uid) else {
-                continue;
-            };
             let (_, out) = self.layout.get(uid).unwrap();
-            let tf = Mat3::from_scale_angle_translation(out.size, 0.0, out.pos);
-            if let Some(color) = style.color {
-                instances.push(Instance2D { tf, color });
-            }
+            space_2d.insert(*uid, Mat3::from_scale_angle_translation(out.size, 0.0, out.pos));
         }
-        draw_2d.instances(self.instances, instances);
 
         self.changed = false;
     }
@@ -185,15 +175,11 @@ impl Layout {
         &mut self,
         uid: Uid,
         lay: Lay,
-        style: Option<Style>,
         text: Option<Text>,
         parent: Option<Uid>,
         index: Option<usize>,
     ) {
         self.layout.insert(uid, (lay, Default::default()));
-        if let Some(style) = style {
-            self.style.insert(uid, style);
-        }
         if let Some(text) = text {
             self.text.insert(uid, text);
         }
@@ -209,7 +195,6 @@ impl Layout {
 impl Delete for Layout {
     fn delete(&mut self, uid: &Uid) {
         self.layout.remove(uid);
-        self.style.remove(uid);
         self.text.remove(uid);
         self.tree.delete(uid);
     }
@@ -304,18 +289,6 @@ pub struct Lay {
     pub pad: Pad,
     pub gap: f32,
     pub direction: Direction,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Style {
-    pub color: Option<Color>,
-    pub border: Option<Border>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Border {
-    width: f32,
-    color: Color,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]

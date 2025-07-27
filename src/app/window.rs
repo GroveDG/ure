@@ -7,23 +7,20 @@ use winit::{
     window::{Window, WindowAttributes},
 };
 
-use crate::{
-    game::SURFACE_FORMAT,
-    sys::{Components, Uid, delete::Delete},
-};
+use crate::data::Entity;
 
 use super::UserEvent;
 
+// (Arc<Window>, Surface<'a>)
+
 #[derive(Debug)]
-pub struct Windows<'a> {
-    pub windows: Components<(Arc<Window>, Surface<'a>)>,
+pub struct Windows {
     pub requested: u8,
     event_proxy: EventLoopProxy<UserEvent>,
-    window_recv: Receiver<(Uid, Window)>,
-    sizes: Components<PhysicalSize<u32>>,
+    window_recv: Receiver<Window>,
 }
 
-impl<'a> Windows<'a> {
+impl Windows {
     pub fn new(
         event_proxy: EventLoopProxy<UserEvent>,
         window_recv: Receiver<(Uid, Window)>,
@@ -45,13 +42,11 @@ impl<'a> Windows<'a> {
     /// by [winit]. We must send an event to
     /// prompt winit to make a window. It will
     /// send the resulting window back.
-    pub fn request(
-        &mut self,
-        uid: Uid,
-        attr: WindowAttributes,
-    ) {
+    pub fn request(&mut self, uid: Uid, attr: WindowAttributes) {
         self.requested += 1;
-        let _ = self.event_proxy.send_event(UserEvent::NewWindow(uid, Box::new(attr)));
+        let _ = self
+            .event_proxy
+            .send_event(UserEvent::NewWindow(uid, Box::new(attr)));
     }
     pub fn receive(&mut self, instance: &Instance, device: &Device) {
         for (uid, window) in self.window_recv.try_iter() {
@@ -77,11 +72,5 @@ impl<'a> Windows<'a> {
     }
     pub fn is_empty(&self) -> bool {
         self.windows.is_empty() && self.requested == 0
-    }
-}
-impl<'a> Delete for Windows<'a> {
-    fn delete(&mut self, uid: &Uid) {
-        self.windows.remove(uid);
-        self.sizes.remove(uid);
     }
 }

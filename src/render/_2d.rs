@@ -9,12 +9,12 @@ use wgpu::{
 };
 
 use crate::{
-    game::{SURFACE_FORMAT, tf::Matrix2D},
-    render::Matrix2DGPU,
-    sys::{Components, Uid, Uids, delete::Delete},
+    game::{
+        tf::{Matrix2D, Space2D}, SURFACE_FORMAT
+    },
+    render::{color::Color, Matrix2DGPU},
+    sys::{delete::Delete, Components, Uid, Uids},
 };
-
-use super::Color;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, PartialEq)]
@@ -208,8 +208,9 @@ impl<'a> Draw2DUpdate<'a> {
             queue,
         }
     }
-    pub fn camera(&mut self, camera: Uid, tf: Matrix2D) {
+    pub fn camera(&mut self, camera: Uid, space_2d: &mut Space2D) {
         // Add padding to Mat3x3 https://github.com/gfx-rs/wgpu-rs/issues/36
+        let tf = space_2d.transforms.get(&camera).unwrap().inverse();
         let tfgpu = Matrix2DGPU::from(tf);
         let bytes = bytemuck::cast_slice(&tfgpu.inner);
         if let Some((_, buffer)) = self.draw_2d.cameras.get(&camera) {

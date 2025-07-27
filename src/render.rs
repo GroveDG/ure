@@ -3,7 +3,6 @@ use std::{
     time::Duration,
 };
 
-use color::{AlphaColor, Srgb};
 use spin_sleep::SpinSleeper;
 use wgpu::{
     Device, Instance, InstanceDescriptor, Queue, RequestAdapterOptions, wgt::DeviceDescriptor,
@@ -12,6 +11,7 @@ use wgpu::{
 use crate::game::tf::{Matrix2D, Precision};
 
 pub mod _2d;
+pub mod color;
 
 // [NOTE] https://www.reddit.com/r/opengl/comments/v5w80e/instancing_how_to_account_for_new_data_after/
 
@@ -26,22 +26,6 @@ impl From<Matrix2D> for Matrix2DGPU {
                 array[0], array[1], array[2], 0.0, array[3], array[4], array[5], 0.0, array[6],
                 array[7], array[8], 0.0,
             ],
-        }
-    }
-}
-
-pub type Color = AlphaColor<Srgb>;
-pub trait GpuColor {
-    fn to_gpu(self) -> wgpu::Color;
-}
-impl GpuColor for Color {
-    fn to_gpu(self) -> wgpu::Color {
-        let components = self.components;
-        wgpu::Color {
-            r: components[0] as f64,
-            g: components[1] as f64,
-            b: components[2] as f64,
-            a: components[3] as f64,
         }
     }
 }

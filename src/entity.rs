@@ -12,29 +12,26 @@ macro_rules! entity {
 #[macro_export]
 macro_rules! compose {
     ($($t:ty),* $(,)?) => {
+    ure::_paste!{
         const COMPOSED: Offset = Offset::ZERO$(.compose(<$t>::SIZE))*;
-        ure::_paste!{
         $(
-        pub fn [<get_$t:lower>](self, data: &Data) -> &<$t as Component>::ComponentType {
-            $t(self.0).get_ref(data)
-        }
-        pub fn [<get_mut_$t:lower>](self, data: &mut Data) -> &mut <$t as Component>::ComponentType {
-            $t(self.0).get_mut(data)
+        pub fn [<get_$t:lower>](self, data: &Data) -> $t {
+            $t(self.0)
         }
         )*
-        }
+    }
     };
 }
 
 #[macro_export]
 macro_rules! comprise {
-    ($($comprise:ident: $t:ty),* $(,)?) => {
+    {$($name:ident: $t:ty),* $(,)?} => {
     ure::_paste!{
-        comprise!{Self::COMPOSED => $($comprise, Self::[<$comprise:upper>].add_const($t::SIZE) =>)* _SIZE}
+        comprise!{Self::COMPOSED => $($name, Self::[<$name:upper>].add_const($t::SIZE) =>)* _SIZE}
         $(
-        pub fn [<get_$comprise>](self) -> $t {
+        pub fn [<get_$name>](self) -> $t {
             unsafe {
-                $t(self.0 + Self::[<$comprise:upper>])
+                $t(self.0 + Self::[<$name:upper>])
             }
         }
         )*

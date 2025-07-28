@@ -34,7 +34,7 @@ macro_rules! components {
 
         pub trait Component {
             type ComponentType;
-            fn get_ref(self, data: &Data) -> &Self::ComponentType;
+            fn get(self, data: &Data) -> &Self::ComponentType;
             fn get_mut(self, data: &mut Data) -> &mut Self::ComponentType;
         }
         $(
@@ -48,7 +48,7 @@ macro_rules! components {
         }
         impl Component for $component {
             type ComponentType = $t;
-            fn get_ref(self, data: &Data) -> &Self::ComponentType {
+            fn get(self, data: &Data) -> &Self::ComponentType {
                 &data.[<$component:lower>][self.0.[<$component:lower>]]
             }
             fn get_mut(self, data: &mut Data) -> &mut Self::ComponentType {

@@ -57,10 +57,15 @@ macro_rules! components {
         }
         )+
 
+        #[repr(transparent)]
+        pub struct Collect<const N: usize, T>(T);
+        impl<const N: usize, T:Entity> Entity for Collect<N, T> {
+            const SIZE: Offset = T::SIZE.mul(N);
+        }
+
         impl Offset {
             pub const ZERO: Self = Self {$([<$component:lower>]: 0),+};
 
-            // Hopefully one day this can be const BitOr
             pub const fn compose(self, rhs: Self) -> Self {
                 $(
                 assert!(self.[<$component:lower>] <= 1);
@@ -72,21 +77,17 @@ macro_rules! components {
                     ),+
                 }
             }
-            pub const fn add_const(self, rhs: Self) -> Self {
+            pub const fn add(self, rhs: Self) -> Self {
                 Self {
                     $(
                     [<$component:lower>]: self.[<$component:lower>] + rhs.[<$component:lower>]
                     ),+
                 }
             }
-        }
-        impl std::ops::Add<Offset> for Offset {
-            type Output = Self;
-
-            fn add(self, rhs: Self) -> Self::Output {
+            pub const fn mul(self, rhs: usize) -> Self {
                 Self {
                     $(
-                    [<$component:lower>]: self.[<$component:lower>] + rhs.[<$component:lower>]
+                    [<$component:lower>]: self.[<$component:lower>] * rhs
                     ),+
                 }
             }

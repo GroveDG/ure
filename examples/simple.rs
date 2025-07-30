@@ -6,7 +6,7 @@ use winit::event_loop::ActiveEventLoop;
 components! {
     Window: Arc<winit::window::Window>,
     Surface: wgpu::Surface<'static>,
-    VisualTransform: ure::game::tf::Transform2D,
+    VisualTransform: glam::Affine2,
     VisualColor: color::Rgba8,
     VisualMesh: wgpu::Buffer,
 }
@@ -27,7 +27,7 @@ entity!(Game);
 impl Game {
     compose!(WindowSurface);
     comprise!{
-        transform_1: VisualTransform,
+        test_obj: Collect::<10, VisualInstance>,
     }
 
     pub fn init(event_loop: &ActiveEventLoop) -> Data {

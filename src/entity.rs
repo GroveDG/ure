@@ -27,11 +27,11 @@ macro_rules! compose {
 macro_rules! comprise {
     {$($name:ident: $t:ty),* $(,)?} => {
     ure::_paste!{
-        comprise!{Self::COMPOSED => $($name, Self::[<$name:upper>].add_const($t::SIZE) =>)* _SIZE}
+        comprise!{Self::COMPOSED => $($name, Self::[<$name:upper>].add($t::SIZE) =>)* _SIZE}
         $(
         pub fn [<get_$name>](self) -> $t {
             unsafe {
-                $t(self.0 + Self::[<$name:upper>])
+                $t(std::mem::transmute(self.0.add(Self::[<$name:upper>])))
             }
         }
         )*

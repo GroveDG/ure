@@ -1,97 +1,89 @@
-#[macro_export]
-macro_rules! components {
-    {$($component:ident : $t:ty),+ $(,)?} => {
-    ure::_paste!{
-        #[derive(Debug, Default)]
-        struct Data {
-            $(
-            pub [<$component:lower>] : Vec<$t>
-            ),+
-        }
-        impl Data {
-            pub fn init(size: Offset) -> Self {
-                Self {
-                    $(
-                    [<$component:lower>] : Vec::<$t>::with_capacity(size.[<$component:lower>]),
-                    )+
-                }
-            }
-            $(
-            pub fn [<init_$component:lower>](&mut self, [<$component:lower>]: $t) {
-                self.[<$component:lower>].push([<$component:lower>]);
-            }
-            )+
-        }
+use std::mem::MaybeUninit;
 
-        struct Offset {
-            $(
-            pub [<$component:lower>] : usize
-            ),+
-        }
-        pub trait Entity {
-            const SIZE: Offset;
-        }
+use crate::{
+    app::{Surface, Window},
+    game::tf::Transform2D,
+};
 
-        pub trait Component {
-            type ComponentType;
-            fn get(self, data: &Data) -> &Self::ComponentType;
-            fn get_mut(self, data: &mut Data) -> &mut Self::ComponentType;
-        }
-        $(
-        #[repr(transparent)]
-        pub struct $component(Offset);
-        impl Entity for $component {
-            const SIZE: Offset = Offset {
-                [<$component:lower>]: 1,
-                ..Offset::ZERO
-            };
-        }
-        impl Component for $component {
-            type ComponentType = $t;
-            fn get(self, data: &Data) -> &Self::ComponentType {
-                &data.[<$component:lower>][self.0.[<$component:lower>]]
-            }
-            fn get_mut(self, data: &mut Data) -> &mut Self::ComponentType {
-                &mut data.[<$component:lower>][self.0.[<$component:lower>]]
-            }
-        }
-        )+
+#[derive(Debug, Default)]
+pub struct Data {
+    pub window: Grouper<Window>,
+    pub surface: Grouper<Surface>,
+    #[cfg(feature = "2D")]
+    pub transform_2d: Grouper<Transform2D>,
+    #[cfg(feature = "3D")]
+    pub transform_3d: Grouper<Transform3D>,
+}
 
-        #[repr(transparent)]
-        pub struct Collect<const N: usize, T>(T);
-        impl<const N: usize, T:Entity> Entity for Collect<N, T> {
-            const SIZE: Offset = T::SIZE.mul(N);
+#[derive(Debug)] // Default impl manually
+pub struct Grouper<T> {
+    elements: Vec<MaybeUninit<T>>,
+    groups: Vec<Group>,
+}
+impl<T> Grouper<T> {
+    pub fn new(capacities: &[usize]) -> Self {
+        let mut groups = Vec::with_capacity(capacities.len());
+        let mut total_capacity = 0;
+        for capacity in capacities {
+            groups.push(Group::new(*capacity, total_capacity));
+            total_capacity += capacity;
         }
-
-        impl Offset {
-            pub const ZERO: Self = Self {$([<$component:lower>]: 0),+};
-
-            pub const fn compose(self, rhs: Self) -> Self {
-                $(
-                assert!(self.[<$component:lower>] <= 1);
-                assert!(rhs.[<$component:lower>] <= 1);
-                )+
-                Self {
-                    $(
-                    [<$component:lower>]: self.[<$component:lower>] | rhs.[<$component:lower>]
-                    ),+
-                }
-            }
-            pub const fn add(self, rhs: Self) -> Self {
-                Self {
-                    $(
-                    [<$component:lower>]: self.[<$component:lower>] + rhs.[<$component:lower>]
-                    ),+
-                }
-            }
-            pub const fn mul(self, rhs: usize) -> Self {
-                Self {
-                    $(
-                    [<$component:lower>]: self.[<$component:lower>] * rhs
-                    ),+
-                }
-            }
+        Self {
+            elements: Vec::with_capacity(total_capacity),
+            groups,
         }
     }
-    };
+    pub fn get_group(&self, group_index: usize) -> &[T] {
+        let group = self.groups[group_index];
+        (&self.elements[group.position .. group.position + group.length])
+    }
+    pub fn mut_group(&mut self, group_index: usize) -> &mut [T] {
+        let group = self.groups[group_index];
+        &mut self.elements[group.position .. group.position + group.length]
+    }
+    pub fn new_group(&mut self, capacity: usize) -> usize {
+        self.groups.push(Group::new(capacity, self.elements.len()));
+        self.elements.reserve(capacity);
+        self.groups.len() - 1
+    }
+    pub fn grow_group(&mut self, group_index: usize, additional: usize) -> usize {
+        self.elements.reserve(additional);
+        self.elements.
+        self.groups[group_index].capacity += additional;
+        self.groups[]
+        for i in group_index..self.groups.len() {
+            self.groups[i].position += additional;
+        }
+        self.elements.reserve(capacity);
+        self.groups.len() - 1
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Group {
+    length: usize,
+    capacity: usize,
+    position: usize,
+}
+impl Group {
+    fn new(capacity: usize, position: usize) -> Self {
+        Self {
+            length: 0,
+            capacity,
+            position,
+        }
+    }
+}
+
+
+
+
+
+impl<T> Default for Grouper<T> {
+    fn default() -> Self {
+        Self {
+            elements: Default::default(),
+            groups: Default::default(),
+        }
+    }
 }

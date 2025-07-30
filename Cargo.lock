@@ -1606,7 +1606,6 @@ dependencies = [
  "macros",
  "nohash-hasher",
  "parking_lot",
- "paste",
  "rand",
  "raw-window-handle",
  "spin_sleep",

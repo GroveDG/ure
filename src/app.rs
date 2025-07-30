@@ -1,3 +1,8 @@
+use std::sync::Arc;
+
+pub type Window = Arc<winit::window::Window>;
+pub type Surface = wgpu::Surface<'static>;
+
 // use std::{
 //     sync::{
 //         Arc,

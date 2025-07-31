@@ -7,83 +7,122 @@ use crate::{
 
 #[derive(Debug, Default)]
 pub struct Data {
-    pub window: Grouper<Window>,
-    pub surface: Grouper<Surface>,
+    pub window: Spanner<Window>,
+    pub surface: Spanner<Surface>,
     #[cfg(feature = "2D")]
-    pub transform_2d: Grouper<Transform2D>,
+    pub transform_2d: Spanner<Transform2D>,
     #[cfg(feature = "3D")]
-    pub transform_3d: Grouper<Transform3D>,
+    pub transform_3d: Spanner<Transform3D>,
+}
+#[macro_export]
+macro_rules! new_group {
+    ($start_span:expr, $end_span:expr, $($component:ident)+) => {
+        ($(data.$component.spans[$start_span ..= $end_span]),+)
+    };
 }
 
 #[derive(Debug)] // Default impl manually
-pub struct Grouper<T> {
+pub struct Spanner<T> {
     elements: Vec<MaybeUninit<T>>,
-    groups: Vec<Group>,
+    spans: Vec<Span>,
 }
-impl<T> Grouper<T> {
+impl<T> Spanner<T> {
     pub fn new(capacities: &[usize]) -> Self {
-        let mut groups = Vec::with_capacity(capacities.len());
         let mut total_capacity = 0;
+        let mut spans = Vec::with_capacity(capacities.len());
         for capacity in capacities {
-            groups.push(Group::new(*capacity, total_capacity));
+            spans.push(Span::new(total_capacity));
             total_capacity += capacity;
         }
-        Self {
-            elements: Vec::with_capacity(total_capacity),
-            groups,
+        let mut elements = Vec::with_capacity(total_capacity);
+        unsafe {
+            elements.set_len(total_capacity);
+        }
+        Self { elements, spans }
+    }
+    pub fn get_span(&self, span_index: usize) -> &[T] {
+        let span = self.spans[span_index];
+        unsafe { std::mem::transmute(&self.elements[span.position..span.position + span.length]) }
+    }
+    pub fn mut_span(&mut self, span_index: usize) -> &mut [T] {
+        let span = self.spans[span_index];
+        unsafe {
+            std::mem::transmute(&mut self.elements[span.position..span.position + span.length])
         }
     }
-    pub fn get_group(&self, group_index: usize) -> &[T] {
-        let group = self.groups[group_index];
-        (&self.elements[group.position .. group.position + group.length])
-    }
-    pub fn mut_group(&mut self, group_index: usize) -> &mut [T] {
-        let group = self.groups[group_index];
-        &mut self.elements[group.position .. group.position + group.length]
-    }
-    pub fn new_group(&mut self, capacity: usize) -> usize {
-        self.groups.push(Group::new(capacity, self.elements.len()));
-        self.elements.reserve(capacity);
-        self.groups.len() - 1
-    }
-    pub fn grow_group(&mut self, group_index: usize, additional: usize) -> usize {
+    fn reserve(&mut self, additional: usize) {
         self.elements.reserve(additional);
-        self.elements.
-        self.groups[group_index].capacity += additional;
-        self.groups[]
-        for i in group_index..self.groups.len() {
-            self.groups[i].position += additional;
+        unsafe {
+            self.elements.set_len(self.elements.len() + additional);
         }
-        self.elements.reserve(capacity);
-        self.groups.len() - 1
+    }
+    pub fn new_span(&mut self) -> usize {
+        self.spans.push(Span::new(self.elements.len()));
+        self.spans.len() - 1
+    }
+    pub fn grow_span(&mut self, span_index: usize, additional: usize) {
+        self.reserve(additional);
+        if let Some(next_span) = self.spans.get(span_index + 1) {
+            self.elements[next_span.position..].rotate_right(additional);
+            for i in span_index + 1..self.spans.len() {
+                self.spans[i].position += additional;
+            }
+        }
+    }
+    fn shrink(&mut self, reduce: usize) {
+        self.elements.truncate(self.elements.len() - reduce);
+    }
+    pub fn shrink_span(&mut self, span_index: usize, reduce: usize) {
+        if let Some(next_span) = self.spans.get(span_index + 1) {
+            self.elements[next_span.position..].rotate_left(reduce);
+            for i in span_index + 1..self.spans.len() {
+                self.spans[i].position -= reduce;
+            }
+        }
+        self.shrink(reduce);
+    }
+    pub fn compress_span(&mut self, span_index: usize) {
+        let span = self.spans[span_index];
+        let span_end = self
+            .spans
+            .get(span_index)
+            .map_or(self.elements.len(), |s| s.position);
+        let capacity = span_end - span.position;
+        self.shrink_span(span_index, capacity - span.length);
+    }
+}
+
+impl<T> Drop for Spanner<T> {
+    fn drop(&mut self) {
+        for span in &self.spans {
+            for element in &mut self.elements[span.position..span.position + span.length] {
+                unsafe {
+                    element.assume_init_drop();
+                }
+            }
+        }
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Group {
+struct Span {
     length: usize,
-    capacity: usize,
     position: usize,
 }
-impl Group {
-    fn new(capacity: usize, position: usize) -> Self {
+impl Span {
+    fn new(position: usize) -> Self {
         Self {
             length: 0,
-            capacity,
             position,
         }
     }
 }
 
-
-
-
-
-impl<T> Default for Grouper<T> {
+impl<T> Default for Spanner<T> {
     fn default() -> Self {
         Self {
             elements: Default::default(),
-            groups: Default::default(),
+            spans: Default::default(),
         }
     }
 }

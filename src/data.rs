@@ -191,7 +191,7 @@ impl<'a, T> GroupIterMut<'a, T> {
     }
 }
 impl<'a, T> Iterator for GroupIterMut<'a, T> {
-    type Item = &'a [T];
+    type Item = &'a mut [T];
     
     fn next(&mut self) -> Option<Self::Item> {
         let Some(span_index) = self.group.0.get(self.g).copied() else {

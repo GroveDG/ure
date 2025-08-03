@@ -6,5 +6,5 @@ fn main() {
     let instances_1 = new_span!(data, 10, transform_2d);
     let instances_2 = new_span!(data, 10, transform_2d);
     let instances = group!(instances_1, instances_2);
-    get_group!(data, instances, transform_2d);
+    get_group!(data, instances, transform_2d mut);
 }

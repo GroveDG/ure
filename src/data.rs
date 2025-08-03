@@ -52,15 +52,17 @@ declare_components! {
 
 #[macro_export]
 macro_rules! get_group {
-    (mut $component:ident, $data:expr) => {
-        iter_mut(&mut $data.$component, &$data.lengths)
+    (get mut $component:ident, $data:expr, $group:expr) => {
+$group.iter_mut(&mut $data.$component, &$data.lengths)
     };
-    ($component:ident, $lengths:expr) => {
-        iter(&data.$component, &$data.lengths)
+    (get $component:ident, $data:expr, $group:expr) => {
+$group.iter(&$data.$component, &$data.lengths)
     };
-    ($data:expr, $group:expr, $($(mut)? $component:ident),+) => {
+    ($data:expr, $group:expr, $(
+        $component:ident $($mut:ident)?
+    ),+) => {
 $(
-let mut $component = $group.get_group!($(mut)? $component, $data);
+let mut $component = ure::get_group!(get $($mut)? $component, $data, $group);
 )+
     };
 }

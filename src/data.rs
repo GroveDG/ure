@@ -5,124 +5,201 @@ use crate::{
     game::tf::Transform2D,
 };
 
+macro_rules! declare_components {
+    ($($(#$attr:tt)? $component:ident : $t:ty,)+ $(,)?) => {
 #[derive(Debug, Default)]
 pub struct Data {
-    pub window: Spanner<Window>,
-    pub surface: Spanner<Surface>,
-    #[cfg(feature = "2D")]
-    pub transform_2d: Spanner<Transform2D>,
-    #[cfg(feature = "3D")]
-    pub transform_3d: Spanner<Transform3D>,
+    pub lengths: Vec<usize>,
+$(
+    $(#$attr)?
+    pub $component : Spanner<$t>,
+)+}
+
+impl Data {
+    pub fn init_span(&mut self) -> usize {
+        self.lengths.push(0);
+        $(
+        $(#$attr)?
+        self.$component.init_span();
+        )+
+        self.lengths.len() - 1
+    }
 }
-#[macro_export]
-macro_rules! new_group {
-    ($start_span:expr, $end_span:expr, $($component:ident)+) => {
-        ($(data.$component.spans[$start_span ..= $end_span]),+)
+
+impl Drop for Data {
+    fn drop(&mut self) {
+        todo!()
+    }
+}
     };
 }
 
+#[macro_export]
+macro_rules! group {
+    [$($span_index:expr),+ $(,)?] => {
+ure::data::Group(vec![$($span_index),+])
+    };
+}
+
+declare_components! {
+    window: Window,
+    surface: Surface,
+    #[cfg(feature = "2D")]
+    transform_2d: Transform2D,
+    #[cfg(feature = "3D")]
+    transform_3d: Transform3D,
+}
+
+#[macro_export]
+macro_rules! get_group {
+    (mut $component:ident, $data:expr) => {
+        iter_mut(&mut $data.$component, &$data.lengths)
+    };
+    ($component:ident, $lengths:expr) => {
+        iter(&data.$component, &$data.lengths)
+    };
+    ($data:expr, $group:expr, $($(mut)? $component:ident),+) => {
+$(
+let mut $component = $group.get_group!($(mut)? $component, $data);
+)+
+    };
+}
+
+#[macro_export]
+macro_rules! new_span {
+    ($data:expr, $length:expr, $($component:ident),+) => {
+{
+let span_index = $data.init_span();
+ure::grow_span!($data, span_index, $length, $($component),+);
+span_index
+}
+    };
+}
+
+#[macro_export]
+macro_rules! grow_span {
+    ($data:expr, $span_index:expr, $additional:expr, $($component:ident),+) => {
+$(
+let positions = &mut $data.$component.positions;
+let start = positions[$span_index + 1];
+for g in $span_index + 1 .. positions.len() {
+    positions[g] += $additional;
+}
+ure::data::reserve(&mut $data.$component.elements, $additional);
+$data.$component.elements[start..].rotate_right($additional);
+)+
+    };
+}
+
+#[macro_export]
+macro_rules! shrink_span {
+    ($data:expr, $span_index:expr, $($component:ident),+, $reduce:expr) => {
+$(
+let positions = &mut $data.$component.positions;
+let start = positions[$span_index + 1];
+for g in $span_index + 1 .. positions.len() {
+    positions[g] -= $reduce;
+}
+$data.$component.elements[start..].rotate_left($reduce);
+ure::data::shrink(&mut $data.$component.elements, $reduce);
+)+
+    };
+}
+
+pub fn reserve<T>(v: &mut SparseVec<T>, additional: usize) {
+    v.reserve(additional);
+    unsafe {
+        v.set_len(v.len() + additional);
+    }
+}
+pub fn shrink<T>(v: &mut SparseVec<T>, reduce: usize) {
+    v.truncate(v.len() - reduce);
+}
+
+type SparseVec<T> = Vec<MaybeUninit<T>>;
 #[derive(Debug)] // Default impl manually
 pub struct Spanner<T> {
-    elements: Vec<MaybeUninit<T>>,
-    spans: Vec<Span>,
+    pub elements: SparseVec<T>,
+    pub positions: Vec<usize>,
 }
-impl<T> Spanner<T> {
-    pub fn new(capacities: &[usize]) -> Self {
-        let mut total_capacity = 0;
-        let mut spans = Vec::with_capacity(capacities.len());
-        for capacity in capacities {
-            spans.push(Span::new(total_capacity));
-            total_capacity += capacity;
-        }
-        let mut elements = Vec::with_capacity(total_capacity);
-        unsafe {
-            elements.set_len(total_capacity);
-        }
-        Self { elements, spans }
-    }
-    pub fn get_span(&self, span_index: usize) -> &[T] {
-        let span = self.spans[span_index];
-        unsafe { std::mem::transmute(&self.elements[span.position..span.position + span.length]) }
-    }
-    pub fn mut_span(&mut self, span_index: usize) -> &mut [T] {
-        let span = self.spans[span_index];
-        unsafe {
-            std::mem::transmute(&mut self.elements[span.position..span.position + span.length])
-        }
-    }
-    fn reserve(&mut self, additional: usize) {
-        self.elements.reserve(additional);
-        unsafe {
-            self.elements.set_len(self.elements.len() + additional);
-        }
-    }
-    pub fn new_span(&mut self) -> usize {
-        self.spans.push(Span::new(self.elements.len()));
-        self.spans.len() - 1
-    }
-    pub fn grow_span(&mut self, span_index: usize, additional: usize) {
-        self.reserve(additional);
-        if let Some(next_span) = self.spans.get(span_index + 1) {
-            self.elements[next_span.position..].rotate_right(additional);
-            for i in span_index + 1..self.spans.len() {
-                self.spans[i].position += additional;
-            }
-        }
-    }
-    fn shrink(&mut self, reduce: usize) {
-        self.elements.truncate(self.elements.len() - reduce);
-    }
-    pub fn shrink_span(&mut self, span_index: usize, reduce: usize) {
-        if let Some(next_span) = self.spans.get(span_index + 1) {
-            self.elements[next_span.position..].rotate_left(reduce);
-            for i in span_index + 1..self.spans.len() {
-                self.spans[i].position -= reduce;
-            }
-        }
-        self.shrink(reduce);
-    }
-    pub fn compress_span(&mut self, span_index: usize) {
-        let span = self.spans[span_index];
-        let span_end = self
-            .spans
-            .get(span_index)
-            .map_or(self.elements.len(), |s| s.position);
-        let capacity = span_end - span.position;
-        self.shrink_span(span_index, capacity - span.length);
-    }
-}
-
-impl<T> Drop for Spanner<T> {
-    fn drop(&mut self) {
-        for span in &self.spans {
-            for element in &mut self.elements[span.position..span.position + span.length] {
-                unsafe {
-                    element.assume_init_drop();
-                }
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct Span {
-    length: usize,
-    position: usize,
-}
-impl Span {
-    fn new(position: usize) -> Self {
-        Self {
-            length: 0,
-            position,
-        }
-    }
-}
-
 impl<T> Default for Spanner<T> {
     fn default() -> Self {
-        Self {
-            elements: Default::default(),
-            spans: Default::default(),
+        Self { elements: Default::default(), positions: Default::default() }
+    }
+}
+impl<T> Spanner<T> {
+    pub fn init_span(&mut self) {
+        self.positions.push(self.elements.len());
+    }
+}
+
+#[repr(transparent)]
+pub struct Group(pub Vec<usize>); // A sequence of span indices
+impl Group {
+    pub fn iter<'a, T>(
+        &'a self,
+        components: &'a Spanner<T>,
+        lengths: &'a Vec<usize>,
+    ) -> GroupIter<'a, T> {
+        GroupIter::new(self, components, lengths)
+    }
+    pub fn iter_mut<'a, T>(
+        &'a self,
+        components: &'a mut Spanner<T>,
+        lengths: &'a Vec<usize>,
+    ) -> GroupIterMut<'a, T> {
+        GroupIterMut::new(self, components, lengths)
+    }
+}
+pub struct GroupIter<'a, T> {
+    group: &'a Group,
+    components: &'a Spanner<T>,
+    lengths: &'a Vec<usize>,
+    g: usize,
+}
+impl<'a, T> GroupIter<'a, T> {
+    fn new(group: &'a Group, components: &'a Spanner<T>, lengths: &'a Vec<usize>) -> Self {
+        Self { group, components, lengths, g: 0 }
+    }
+}
+impl<'a, T> Iterator for GroupIter<'a, T> {
+    type Item = &'a [T];
+    
+    fn next(&mut self) -> Option<Self::Item> {
+        let Some(span_index) = self.group.0.get(self.g).copied() else {
+            return None;
+        };
+        let length = self.lengths[span_index];
+        let position = self.components.positions[span_index];
+        self.g += 1;
+        unsafe {
+            std::mem::transmute(&self.components.elements[position .. position + length])
+        }
+    }
+}
+pub struct GroupIterMut<'a, T> {
+    group: &'a Group,
+    components: &'a mut Spanner<T>,
+    lengths: &'a Vec<usize>,
+    g: usize,
+}
+impl<'a, T> GroupIterMut<'a, T> {
+    fn new(group: &'a Group, components: &'a mut Spanner<T>, lengths: &'a Vec<usize>) -> Self {
+        Self { group, components, lengths, g: 0 }
+    }
+}
+impl<'a, T> Iterator for GroupIterMut<'a, T> {
+    type Item = &'a [T];
+    
+    fn next(&mut self) -> Option<Self::Item> {
+        let Some(span_index) = self.group.0.get(self.g).copied() else {
+            return None;
+        };
+        let length = self.lengths[span_index];
+        let position = self.components.positions[span_index];
+        self.g += 1;
+        unsafe {
+            std::mem::transmute(&mut self.components.elements[position .. position + length])
         }
     }
 }

@@ -1,4 +1,4 @@
-use ure::{data::Data, game::tf::Transform2D, get_group, group, new_span};
+use ure::{data::{Data, Group}, game::tf::Transform2D, get_group, new_span};
 
 fn main() {
     // Default Data is empty.
@@ -10,7 +10,7 @@ fn main() {
     let instances_2 = new_span!(data, 10, transform_2d);
     // Groups combine spans into iterators.
     // Groups do not keep track of what components they have in common.
-    let instances = group!(instances_1, instances_2);
+    let instances = Group::new(&[instances_1, instances_2]);
     // Enclose when getting a group so that the components are not
     // leaked into the surrounding context.
     {

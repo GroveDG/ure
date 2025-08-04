@@ -9,20 +9,70 @@ macro_rules! declare_components {
     ($($(#$attr:tt)? $component:ident : $t:ty,)+ $(,)?) => {
 #[derive(Debug, Default)]
 pub struct Data {
-    pub lengths: Vec<usize>,
 $(
     $(#$attr)?
-    pub $component : Spanner<$t>,
+    pub $component : Slicer<$t>,
 )+}
 
-impl Data {
-    pub fn init_span(&mut self) -> usize {
-        self.lengths.push(0);
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Span {
+    pub length: usize,
+    $(
+    $(#$attr)?
+    pub $component : Option<usize>,
+    )+
+}
+impl Span {
+    pub fn grow_span(&self, data: &mut Data, additional: usize) {
         $(
         $(#$attr)?
-        self.$component.init_span();
+        if let Some($component) = self.$component {
+            data.$component.grow_slice($component, additional);
+        }
         )+
-        self.lengths.len() - 1
+    }
+    pub fn shrink_span(&self, data: &mut Data, reduce: usize) {
+        $(
+        $(#$attr)?
+        if let Some($component) = self.$component {
+            data.$component.shrink_slice($component, reduce);
+        }
+        )+
+    }
+}
+
+pub struct Group {
+    pub lengths : Vec<usize>,
+    $(
+    $(#$attr)?
+    pub $component : Option<Vec<usize>>,
+    )+
+}
+impl Group {
+    pub fn new(spans: &[Span]) -> Self {
+        let mut lengths = Vec::new();
+        $(
+        $(#$attr)?
+        let mut $component = Some(Vec::new());
+        )+
+        for span in spans {
+            lengths.push(span.length);
+            $(
+            $(#$attr)?
+            if let Some(ref mut grouped) = $component && let Some(index) = span.$component {
+                grouped.push(index);
+            } else {
+                $component = None;
+            }
+            )+
+        }
+        Self {
+            lengths,
+            $(
+            $(#$attr)?
+            $component,
+            )+
+        }
     }
 }
 
@@ -31,13 +81,6 @@ impl Drop for Data {
         todo!()
     }
 }
-    };
-}
-
-#[macro_export]
-macro_rules! group {
-    [$($span_index:expr),+ $(,)?] => {
-ure::data::Group(vec![$($span_index),+])
     };
 }
 
@@ -53,16 +96,16 @@ declare_components! {
 #[macro_export]
 macro_rules! get_group {
     (get mut $component:ident, $data:expr, $group:expr) => {
-$group.iter_mut(&mut $data.$component, &$data.lengths)
+$group.iter_mut($group.$component.as_ref().unwrap(), &mut $data.$component)
     };
     (get $component:ident, $data:expr, $group:expr) => {
-$group.iter(&$data.$component, &$data.lengths)
+$group.iter(&$group.$component.as_ref().unwrap(), &$data.$component)
     };
     ($data:expr, $group:expr, $(
         $component:ident $($mut:ident)?
     ),+) => {
 $(
-let mut $component = ure::get_group!(get $($mut)? $component, $data, $group);
+let mut $component = $crate::get_group!(get $($mut)? $component, $data, $group);
 )+
     };
 }
@@ -70,138 +113,142 @@ let mut $component = ure::get_group!(get $($mut)? $component, $data, $group);
 #[macro_export]
 macro_rules! new_span {
     ($data:expr, $length:expr, $($component:ident),+) => {
-{
-let span_index = $data.init_span();
-ure::grow_span!($data, span_index, $length, $($component),+);
-span_index
+$crate::data::Span {
+    length: $length,
+    $(
+    $component : Some($data.$component.init_slice()),
+    )+
+    ..Default::default()
 }
     };
 }
 
-#[macro_export]
-macro_rules! grow_span {
-    ($data:expr, $span_index:expr, $additional:expr, $($component:ident),+) => {
-$(
-let positions = &mut $data.$component.positions;
-let start = positions[$span_index + 1];
-for g in $span_index + 1 .. positions.len() {
-    positions[g] += $additional;
-}
-ure::data::reserve(&mut $data.$component.elements, $additional);
-$data.$component.elements[start..].rotate_right($additional);
-)+
-    };
-}
-
-#[macro_export]
-macro_rules! shrink_span {
-    ($data:expr, $span_index:expr, $($component:ident),+, $reduce:expr) => {
-$(
-let positions = &mut $data.$component.positions;
-let start = positions[$span_index + 1];
-for g in $span_index + 1 .. positions.len() {
-    positions[g] -= $reduce;
-}
-$data.$component.elements[start..].rotate_left($reduce);
-ure::data::shrink(&mut $data.$component.elements, $reduce);
-)+
-    };
-}
-
-pub fn reserve<T>(v: &mut SparseVec<T>, additional: usize) {
-    v.reserve(additional);
-    unsafe {
-        v.set_len(v.len() + additional);
-    }
-}
-pub fn shrink<T>(v: &mut SparseVec<T>, reduce: usize) {
-    v.truncate(v.len() - reduce);
-}
-
-type SparseVec<T> = Vec<MaybeUninit<T>>;
 #[derive(Debug)] // Default impl manually
-pub struct Spanner<T> {
-    pub elements: SparseVec<T>,
+pub struct Slicer<T> {
+    pub elements: Vec<MaybeUninit<T>>,
     pub positions: Vec<usize>,
 }
-impl<T> Default for Spanner<T> {
-    fn default() -> Self {
-        Self { elements: Default::default(), positions: Default::default() }
-    }
-}
-impl<T> Spanner<T> {
-    pub fn init_span(&mut self) {
-        self.positions.push(self.elements.len());
-    }
-}
 
-#[repr(transparent)]
-pub struct Group(pub Vec<usize>); // A sequence of span indices
+impl<T> Slicer<T> {
+    pub fn init_slice(&mut self) -> usize {
+        self.positions.push(self.elements.len());
+        self.positions.len() - 1
+    }
+    pub fn grow_slice(&mut self, index: usize, additional: usize) {
+        self.elements.reserve(additional);
+        unsafe {
+            self.elements.set_len(self.elements.len() + additional);
+        }
+
+        let start = self.positions[index];
+        self.elements[start..].rotate_right(additional);
+
+        for position in &mut self.positions[index + 1..] {
+            *position += additional;
+        }
+    }
+    pub fn shrink_slice(&mut self, index: usize, reduce: usize) {
+        self.elements.truncate(self.elements.len() - reduce);
+
+        let start = self.positions[index];
+        self.elements[start..].rotate_left(reduce);
+
+        for position in &mut self.positions[index + 1..] {
+            *position -= reduce;
+        }
+    }
+    pub fn get_slice(&self, index: usize, length: usize) -> &[T] {
+        let position = self.positions[index];
+        unsafe {
+            std::mem::transmute(&self.elements[position .. position + length])
+        }
+    }
+    pub fn get_mut_slice(&mut self, index: usize, length: usize) -> &mut [T] {
+        let position = self.positions[index];
+        unsafe {
+            std::mem::transmute(&mut self.elements[position .. position + length])
+        }
+    }
+}
+impl<T> Default for Slicer<T> {
+    fn default() -> Self {
+        Self {
+            elements: Default::default(),
+            positions: Default::default(),
+        }
+    }
+}
 impl Group {
     pub fn iter<'a, T>(
         &'a self,
-        components: &'a Spanner<T>,
-        lengths: &'a Vec<usize>,
+        slice_indices: &'a [usize],
+        components: &'a Slicer<T>,
     ) -> GroupIter<'a, T> {
-        GroupIter::new(self, components, lengths)
+        GroupIter::new(&self.lengths, slice_indices, components)
     }
     pub fn iter_mut<'a, T>(
         &'a self,
-        components: &'a mut Spanner<T>,
-        lengths: &'a Vec<usize>,
+        slice_indices: &'a [usize],
+        components: &'a mut Slicer<T>,
     ) -> GroupIterMut<'a, T> {
-        GroupIterMut::new(self, components, lengths)
+        GroupIterMut::new(&self.lengths, slice_indices, components)
     }
 }
 pub struct GroupIter<'a, T> {
-    group: &'a Group,
-    components: &'a Spanner<T>,
-    lengths: &'a Vec<usize>,
+    lengths: &'a [usize],
+    slice_indices: &'a [usize],
+    components: &'a Slicer<T>,
     g: usize,
 }
 impl<'a, T> GroupIter<'a, T> {
-    fn new(group: &'a Group, components: &'a Spanner<T>, lengths: &'a Vec<usize>) -> Self {
-        Self { group, components, lengths, g: 0 }
+    fn new(lengths: &'a [usize], slice_indices: &'a [usize], components: &'a Slicer<T>) -> Self {
+        Self {
+            lengths,
+            slice_indices,
+            components,
+            g: 0,
+        }
     }
 }
 impl<'a, T> Iterator for GroupIter<'a, T> {
     type Item = &'a [T];
-    
+
     fn next(&mut self) -> Option<Self::Item> {
-        let Some(span_index) = self.group.0.get(self.g).copied() else {
+        let Some(slice_index) = self.slice_indices.get(self.g).copied() else {
             return None;
         };
-        let length = self.lengths[span_index];
-        let position = self.components.positions[span_index];
+        let length = self.lengths[slice_index];
+        let position = self.components.positions[slice_index];
         self.g += 1;
-        unsafe {
-            std::mem::transmute(&self.components.elements[position .. position + length])
-        }
+        unsafe { std::mem::transmute(&self.components.elements[position..position + length]) }
     }
 }
 pub struct GroupIterMut<'a, T> {
-    group: &'a Group,
-    components: &'a mut Spanner<T>,
-    lengths: &'a Vec<usize>,
+    lengths: &'a [usize],
+    slice_indices: &'a [usize],
+    components: &'a mut Slicer<T>,
     g: usize,
 }
 impl<'a, T> GroupIterMut<'a, T> {
-    fn new(group: &'a Group, components: &'a mut Spanner<T>, lengths: &'a Vec<usize>) -> Self {
-        Self { group, components, lengths, g: 0 }
+    fn new(lengths: &'a [usize], slice_indices: &'a [usize], components: &'a mut Slicer<T>) -> Self {
+        Self {
+            lengths,
+            slice_indices,
+            components,
+            g: 0,
+        }
     }
 }
 impl<'a, T> Iterator for GroupIterMut<'a, T> {
     type Item = &'a mut [T];
-    
+
     fn next(&mut self) -> Option<Self::Item> {
-        let Some(span_index) = self.group.0.get(self.g).copied() else {
+        let Some(slice_index) = self.slice_indices.get(self.g).copied() else {
             return None;
         };
-        let length = self.lengths[span_index];
-        let position = self.components.positions[span_index];
+        let length = self.lengths[slice_index];
+        let position = self.components.positions[slice_index];
         self.g += 1;
-        unsafe {
-            std::mem::transmute(&mut self.components.elements[position .. position + length])
-        }
+        unsafe { std::mem::transmute(&mut self.components.elements[position..position + length]) }
     }
 }

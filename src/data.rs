@@ -1,10 +1,5 @@
 use std::mem::MaybeUninit;
 
-use crate::{
-    app::{Surface, Window},
-    game::tf::Transform2D,
-};
-
 macro_rules! declare_components {
     ($($(#$attr:tt)? $component:ident : $t:ty,)+ $(,)?) => {
 #[derive(Debug, Default)]
@@ -85,12 +80,12 @@ impl Drop for Data {
 }
 
 declare_components! {
-    window: Window,
-    surface: Surface,
+    window: crate::app::Window,
+    surface: crate::gpu::Surface,
     #[cfg(feature = "2D")]
-    transform_2d: Transform2D,
+    transform_2d: crate::tf::Transform2D,
     #[cfg(feature = "3D")]
-    transform_3d: Transform3D,
+    transform_3d: crate::tf::Transform3D,
 }
 
 #[macro_export]
@@ -99,13 +94,30 @@ macro_rules! get_group {
 $group.iter_mut($group.$component.as_ref().unwrap(), &mut $data.$component)
     };
     (get $component:ident, $data:expr, $group:expr) => {
-$group.iter(&$group.$component.as_ref().unwrap(), &$data.$component)
+$group.iter($group.$component.as_ref().unwrap(), &$data.$component)
     };
     ($data:expr, $group:expr, $(
         $component:ident $($mut:ident)?
     ),+) => {
 $(
 let mut $component = $crate::get_group!(get $($mut)? $component, $data, $group);
+)+
+    };
+}
+
+#[macro_export]
+macro_rules! get_span {
+    (get mut $component:ident, $data:expr, $span:expr) => {
+$data.$component.get_mut_slice($span.$component.unwrap(), $span.length)
+    };
+    (get $component:ident, $data:expr, $span:expr) => {
+$data.$component.get_slice($span.$component.unwrap(), $span.length)
+    };
+    ($data:expr, $span:expr, $(
+        $component:ident $($mut:ident)?
+    ),+) => {
+$(
+let mut $component = $crate::get_span!(get $($mut)? $component, $data, $span);
 )+
     };
 }
@@ -120,6 +132,17 @@ $crate::data::Span {
     )+
     ..Default::default()
 }
+    };
+}
+
+#[macro_export]
+macro_rules! extend_span {
+    ($data:expr, $span:expr, $additional:expr, $($component:ident),+) => {
+let length = $span.length;
+$span.length += $additional;
+$(
+let $component = $data.$component.extend_slice($span.$component.unwrap(), length, $additional);
+)+
     };
 }
 
@@ -159,15 +182,28 @@ impl<T> Slicer<T> {
     }
     pub fn get_slice(&self, index: usize, length: usize) -> &[T] {
         let position = self.positions[index];
-        unsafe {
-            std::mem::transmute(&self.elements[position .. position + length])
-        }
+        unsafe { std::mem::transmute(&self.elements[position..position + length]) }
     }
     pub fn get_mut_slice(&mut self, index: usize, length: usize) -> &mut [T] {
         let position = self.positions[index];
-        unsafe {
-            std::mem::transmute(&mut self.elements[position .. position + length])
+        unsafe { std::mem::transmute(&mut self.elements[position..position + length]) }
+    }
+    pub fn extend_slice(
+        &mut self,
+        index: usize,
+        length: usize,
+        additional: usize,
+    ) -> &mut [MaybeUninit<T>] {
+        let position = self.positions[index] + length;
+        let next_position = self
+            .positions
+            .get(index + 1)
+            .copied()
+            .unwrap_or(self.positions.len());
+        if position + additional > next_position {
+            self.grow_slice(index, next_position - position + additional);
         }
+        &mut self.elements[position..position + additional]
     }
 }
 impl<T> Default for Slicer<T> {
@@ -230,7 +266,11 @@ pub struct GroupIterMut<'a, T> {
     g: usize,
 }
 impl<'a, T> GroupIterMut<'a, T> {
-    fn new(lengths: &'a [usize], slice_indices: &'a [usize], components: &'a mut Slicer<T>) -> Self {
+    fn new(
+        lengths: &'a [usize],
+        slice_indices: &'a [usize],
+        components: &'a mut Slicer<T>,
+    ) -> Self {
         Self {
             lengths,
             slice_indices,

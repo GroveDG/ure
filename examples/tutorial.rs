@@ -1,27 +1,15 @@
-use ure::{app::init_windows, data::{Data, Group, Span}, extend_span, get_group, get_span, gpu::{init_surfaces, Gpu}, new_span, tf::Transform2D};
+use ure::{
+    app::{App, init_windows},
+    data::{Data, Span},
+    extend_span, get_span,
+    gpu::{Gpu, init_surfaces},
+    new_span,
+};
 
 fn main() {
-    // Default Data is empty.
-    let mut data = Data::default();
-    // Defining a span takes in all components which the span uses.
-    let instances_1 = new_span!(data, 10, transform_2d);
-    // Multiple spans can be of the same component.
-    let instances_2 = new_span!(data, 10, transform_2d);
-    // Groups combine spans into iterators.
-    // Groups do not keep track of what components they have in common.
-    let instances = Group::new(&[instances_1, instances_2]);
-    // Enclose when getting a group so that the components are not
-    // leaked into the surrounding context.
-    {
-        // When getting a group, you have to specify components which
-        // the group has in common.
-        get_group!(data, instances, transform_2d mut);
-        // Components of groups yield the slices represented by their
-        // member spans.
-        for transform_2d_slice in transform_2d {
-            example_fn(transform_2d_slice);
-        }
-    }
+    let mut app: App<Game> = App::default();
+    let event_loop = winit::event_loop::EventLoop::new().unwrap();
+    event_loop.run_app(&mut app).unwrap();
 }
 
 struct Game {
@@ -51,9 +39,4 @@ impl ure::app::Game for Game {
     fn run(self) {
         todo!()
     }
-}
-
-// Functions take contiguous slices.
-fn example_fn(transform_2d: &mut[Transform2D]) {
-
 }

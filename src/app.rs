@@ -50,3 +50,12 @@ impl<G: Game> ApplicationHandler for App<G> {
         }
     }
 }
+
+impl<G: Game> Default for App<G> {
+    fn default() -> Self {
+        Self {
+            game: Default::default(),
+            _marker: Default::default(),
+        }
+    }
+}

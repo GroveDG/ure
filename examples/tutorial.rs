@@ -23,20 +23,21 @@ impl ure::app::Game for Game {
         let gpu = futures::executor::block_on(Gpu::new());
         let mut windows = new_span!(data, 1, window, surface);
         {
-            extend_span!(data, windows, 1, window);
+            extend_span!(data, windows, 1, window, surface);
             init_windows(window, event_loop);
             get_span!(data, windows, window);
-            extend_span!(data, windows, 1, surface);
             init_surfaces(window, surface, &gpu);
         }
         Game {
-            data: Data::default(),
+            data,
             gpu,
             windows,
         }
     }
 
     fn run(self) {
-        todo!()
+        loop {
+            std::hint::black_box(&self.data);
+        }
     }
 }

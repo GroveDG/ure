@@ -124,13 +124,17 @@ let mut $component = $crate::get_span!(get $($mut)? $component, $data, $span);
 
 #[macro_export]
 macro_rules! new_span {
-    ($data:expr, $length:expr, $($component:ident),+) => {
-$crate::data::Span {
-    length: $length,
-    $(
-    $component : Some($data.$component.init_slice()),
-    )+
-    ..Default::default()
+    ($data:expr, $capacity:expr, $($component:ident),+) => {
+{
+    let span = $crate::data::Span {
+        length: 0,
+        $(
+        $component : Some($data.$component.init_slice()),
+        )+
+        ..Default::default()
+    };
+    span.grow_span(&mut $data, $capacity);
+    span
 }
     };
 }
@@ -139,10 +143,10 @@ $crate::data::Span {
 macro_rules! extend_span {
     ($data:expr, $span:expr, $additional:expr, $($component:ident),+) => {
 let length = $span.length;
-$span.length += $additional;
 $(
 let $component = $data.$component.extend_slice($span.$component.unwrap(), length, $additional);
 )+
+$span.length += $additional;
     };
 }
 
@@ -195,14 +199,6 @@ impl<T> Slicer<T> {
         additional: usize,
     ) -> &mut [MaybeUninit<T>] {
         let position = self.positions[index] + length;
-        let next_position = self
-            .positions
-            .get(index + 1)
-            .copied()
-            .unwrap_or(self.positions.len());
-        if position + additional > next_position {
-            self.grow_slice(index, next_position - position + additional);
-        }
         &mut self.elements[position..position + additional]
     }
 }

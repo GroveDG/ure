@@ -41,7 +41,7 @@ impl<G: Game> ApplicationHandler for App<G> {
         window_id: winit::window::WindowId,
         event: winit::event::WindowEvent,
     ) {
-        todo!()
+        // TODO
     }
 
     fn exiting(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {

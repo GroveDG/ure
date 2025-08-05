@@ -1,9 +1,7 @@
 use ure::{
-    app::{App, init_windows},
-    data::{Data, Span},
-    extend_span, get_span,
+    app::{App, Window, init_windows},
+    data::{Data, SpanMask},
     gpu::{Gpu, init_surfaces},
-    new_span,
 };
 
 fn main() {
@@ -15,29 +13,40 @@ fn main() {
 struct Game {
     data: Data,
     gpu: Gpu,
-    windows: Span,
+    windows: usize,
 }
 impl ure::app::Game for Game {
     fn new(event_loop: &winit::event_loop::ActiveEventLoop) -> Self {
         let mut data = Data::default();
         let gpu = futures::executor::block_on(Gpu::new());
-        let mut windows = new_span!(data, 1, window, surface);
+        let windows = data.new_span(SpanMask {
+            window: true,
+            surface: true,
+            ..Default::default()
+        });
+        data.grow_span(windows, 1);
         {
-            extend_span!(data, windows, 1, window, surface);
+            let span = data.extend_span(windows, 1);
+            let window = span.window.unwrap();
+            let surface = span.surface.unwrap();
             init_windows(window, event_loop);
-            get_span!(data, windows, window);
+            let window: &mut [Window] = unsafe { std::mem::transmute(window) };
             init_surfaces(window, surface, &gpu);
         }
-        Game {
-            data,
-            gpu,
-            windows,
-        }
+        Game { data, gpu, windows }
     }
 
     fn run(self) {
         loop {
-            std::hint::black_box(&self.data);
+            {
+                let span = self.data.get_span(self.windows);
+                let surfaces = span.surface.unwrap();
+                let mut encoders = ure::gpu::init_encoders(surfaces.len(), &self.gpu);
+                let surface_textures = ure::gpu::init_surface_textures(surfaces);
+                ure::gpu::clear_surfaces(&mut encoders, &surface_textures, wgpu::Color::BLACK);
+                ure::gpu::submit_encoders(encoders, &self.gpu);
+                ure::gpu::present_surfaces(surface_textures);
+            }
         }
     }
 }

@@ -1,5 +1,4 @@
-use std::mem::MaybeUninit;
-
+#[macro_export]
 macro_rules! declare_components {
     ($($(#$attr:tt)? $component:ident : $t:ty,)+ $(,)?) => {
 #[derive(Debug, Default)]
@@ -7,7 +6,7 @@ pub struct Data {
     pub spans: Vec<Span>,
 $(
     $(#$attr)?
-    pub $component : Slicer<$t>,
+    pub $component : $crate::data::Slicer<$t>,
 )+}
 
 impl Data {
@@ -95,7 +94,7 @@ pub struct SpanMut<'a> {
 pub struct SpanInit<'a> {
     $(
     $(#$attr)?
-    pub $component : Option<&'a mut [MaybeUninit<$t>]>,
+    pub $component : Option<&'a mut [std::mem::MaybeUninit<$t>]>,
     )+
 }
 
@@ -128,20 +127,9 @@ impl Drop for Data {
     };
 }
 
-declare_components! {
-    window: crate::app::Window,
-    surface: crate::gpu::Surface,
-    #[cfg(feature = "2D")]
-    transform_2d: crate::tf::Transform2D,
-    #[cfg(feature = "2D")]
-    mesh: crate::render::MeshHandle,
-    #[cfg(feature = "3D")]
-    transform_3d: crate::tf::Transform3D,
-}
-
 #[derive(Debug)] // Default impl manually
 pub struct Slicer<T> {
-    pub elements: Vec<MaybeUninit<T>>,
+    pub elements: Vec<std::mem::MaybeUninit<T>>,
     pub positions: Vec<usize>,
 }
 
@@ -186,7 +174,7 @@ impl<T> Slicer<T> {
         index: usize,
         length: usize,
         additional: usize,
-    ) -> &mut [MaybeUninit<T>] {
+    ) -> &mut [std::mem::MaybeUninit<T>] {
         let position = self.positions[index] + length;
         &mut self.elements[position..position + additional]
     }

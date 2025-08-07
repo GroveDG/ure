@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bimap = "0.6.3"
+bitvec = "1.0.1"
 bytemuck = "1.23.0"
 color = { version = "0.3.1", features = ["bytemuck"] }
 fontdue = "0.9.3"
@@ -13,12 +13,13 @@ glam = { version = "0.30.3", features = ["bytemuck"] }
 parking_lot = "0.12.3"
 rand = "0.9.1"
 raw-window-handle = "0.6.2"
+rustc-hash = "2.1.1"
 spin_sleep = "1.3.1"
 wgpu = "25.0.2"
 winit = { version = "0.30.11", default-features = false, features = ["ahash", "bytemuck", "memmap2", "percent-encoding", "rwh_06", "wayland", "wayland-backend", "wayland-client", "wayland-dlopen", "wayland-protocols", "wayland-protocols-plasma",] }
 
 [features]
-default = ["2D", "GUI"]
-2D = []
-3D = []
-GUI = []
+default = ["2d", "gui"]
+2d = []
+3d = []
+gui = ["2d"]

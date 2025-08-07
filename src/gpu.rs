@@ -5,9 +5,16 @@ use wgpu::{
     RenderPassDescriptor, RequestAdapterOptions, SurfaceTexture, wgt::SurfaceConfiguration,
 };
 
+use crate::declare_components;
+
 pub type Surface = wgpu::Surface<'static>;
 
 const SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
+
+declare_components!{
+    window: crate::app::Window,
+    surface: crate::gpu::Surface,
+}
 
 pub fn init_surfaces(
     windows: &[crate::app::Window],

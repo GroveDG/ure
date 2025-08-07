@@ -1,8 +1,13 @@
 use ure::{
-    app::{App, Window, init_windows},
-    data::{Data, SpanMask},
+    app::{App, Input, Window, init_windows},
     gpu::{Gpu, init_surfaces},
 };
+
+#[repr(usize)]
+#[derive(Debug, Clone, Copy)]
+pub enum Actions {
+    Jump,
+}
 
 fn main() {
     let mut app: App<Game> = App::default();
@@ -11,35 +16,42 @@ fn main() {
 }
 
 struct Game {
-    data: Data,
+    gpu_data: ure::gpu::Data,
+    // game_data: ure::game::Data,
     gpu: Gpu,
     windows: usize,
+    input: Input,
 }
 impl ure::app::Game for Game {
-    fn new(event_loop: &winit::event_loop::ActiveEventLoop) -> Self {
-        let mut data = Data::default();
+    fn new(event_loop: &winit::event_loop::ActiveEventLoop, input: Input) -> Self {
+        let mut gpu_data = ure::gpu::Data::default();
         let gpu = futures::executor::block_on(Gpu::new());
-        let windows = data.new_span(SpanMask {
+        let windows = gpu_data.new_span(ure::gpu::SpanMask {
             window: true,
             surface: true,
             ..Default::default()
         });
-        data.grow_span(windows, 1);
+        gpu_data.grow_span(windows, 1);
         {
-            let span = data.extend_span(windows, 1);
+            let span = gpu_data.extend_span(windows, 1);
             let window = span.window.unwrap();
             let surface = span.surface.unwrap();
             init_windows(window, event_loop);
             let window: &mut [Window] = unsafe { std::mem::transmute(window) };
             init_surfaces(window, surface, &gpu);
         }
-        Game { data, gpu, windows }
+        Game {
+            gpu_data,
+            gpu,
+            windows,
+            input,
+        }
     }
 
     fn run(self) {
         loop {
             {
-                let span = self.data.get_span(self.windows);
+                let span = self.gpu_data.get_span(self.windows);
                 let surfaces = span.surface.unwrap();
                 let mut encoders = ure::gpu::init_encoders(surfaces.len(), &self.gpu);
                 let surface_textures = ure::gpu::init_surface_textures(surfaces);

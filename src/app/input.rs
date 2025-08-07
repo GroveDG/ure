@@ -50,6 +50,12 @@ impl Actions {
 }
 
 impl Input {
+    pub fn get_input(&self) -> PlayerActions {
+        self.player_actions.lock().clone()
+    }
+    pub fn set_input_map(&self, input_map: InputMap) {
+        *self.input_map.lock() = input_map;
+    }
     pub fn process_device_event(&self, device_id: &DeviceId, event: DeviceEvent) {
         let input_map = self.input_map.lock();
         let Some(&player) = input_map.device_map.get(device_id) else {

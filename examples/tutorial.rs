@@ -53,10 +53,12 @@ impl ure::app::Game for Game {
             {
                 let span = self.gpu_data.get_span(self.windows);
                 let surfaces = span.surface.unwrap();
-                let mut encoders = ure::gpu::init_encoders(surfaces.len(), &self.gpu);
                 let surface_textures = ure::gpu::init_surface_textures(surfaces);
-                ure::gpu::clear_surfaces(&mut encoders, &surface_textures, wgpu::Color::BLACK);
-                ure::gpu::submit_encoders(encoders, &self.gpu);
+                {
+                    let mut encoders = ure::gpu::init_encoders(surfaces.len(), &self.gpu);
+                    ure::gpu::clear_surfaces(&mut encoders, &surface_textures, wgpu::Color::BLACK);
+                    ure::gpu::submit_encoders(encoders, &self.gpu);
+                }
                 ure::gpu::present_surfaces(surface_textures);
             }
         }

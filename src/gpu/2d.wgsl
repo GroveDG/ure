@@ -1,7 +1,12 @@
 // Vertex shader
 
 @group(0) @binding(0)
-var<uniform> camera: mat3x3<f32>;
+var<uniform> camera: Affine2D;
+
+struct Affine2D {
+    transform: mat2x2<f32>,
+    translation: vec2<f32>,
+}
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
@@ -14,9 +19,9 @@ struct VertexInput {
     @location(2) uv: vec2<f32>,
 };
 struct InstanceInput {
-    @location(3) row0: vec3<f32>,
-    @location(4) row1: vec3<f32>,
-    @location(5) row2: vec3<f32>,
+    @location(3) row0: vec2<f32>,
+    @location(4) row1: vec2<f32>,
+    @location(5) translation: vec2<f32>,
     @location(6) color: vec4<f32>,
 };
 
@@ -26,12 +31,13 @@ fn vertex(
     instance: InstanceInput,
 ) -> VertexOutput {
     var out: VertexOutput;
-    let transform = mat3x3<f32> (
+    var transform: Affine2D;
+    transform.transform = mat2x2<f32> (
         instance.row0,
         instance.row1,
-        instance.row2,
     );
-    out.clip_position = (camera * transform * vec3<f32>(vertex.position.x, vertex.position.y, 1.0)).xyzz;
+    transform.translation = instance.translation;
+    out.clip_position = vec4<f32>(camera.transform * (transform.transform * vertex.position + transform.translation) + camera.translation, 0.0, 0.0);
     out.color = vertex.color * instance.color;
     return out;
 }

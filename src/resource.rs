@@ -2,30 +2,24 @@ use std::sync::{Arc, Weak};
 
 use parking_lot::Mutex;
 
-pub struct Resource<T: Load> {
-    source: T::Source,
+pub struct Resource<T, F = fn() -> T> {
     weak: Mutex<Weak<T>>,
+    f: F,
 }
-impl<T: Load> Resource<T> {
-    const fn new(source: T::Source) -> Self {
+impl<T, F: Fn() -> T> Resource<T, F> {
+    pub const fn new(f: F) -> Self {
         Self {
-            source,
             weak: Mutex::new(Weak::new()),
+            f,
         }
     }
-    fn load(&'static self) -> Arc<T> {
+    pub fn load(&'static self) -> Arc<T> {
         let mut lock = self.weak.lock();
         if let Some(arc) = lock.upgrade() {
             return arc;
         }
-        let arc = Arc::new(T::load(&self.source));
+        let arc = Arc::new((self.f)());
         *lock = Arc::downgrade(&arc);
         arc
     }
-}
-
-pub trait Load {
-    type Source;
-
-    fn load(source: &Self::Source) -> Self;
 }

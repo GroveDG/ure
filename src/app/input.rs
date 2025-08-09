@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use bitvec::vec::BitVec;
 use parking_lot::Mutex;
 use rustc_hash::FxHashMap;

@@ -18,11 +18,6 @@ const SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
 pub static GPU: std::sync::LazyLock<Gpu> =
     std::sync::LazyLock::new(|| futures::executor::block_on(Gpu::new()));
 
-declare_components! {
-    window: crate::app::Window,
-    surface: crate::gpu::Surface,
-}
-
 pub type Color = color::AlphaColor<Srgb>;
 
 pub fn init_surfaces(

@@ -2,6 +2,8 @@ use std::{marker::PhantomData, mem::MaybeUninit, sync::Arc};
 
 use winit::{application::ApplicationHandler, window::WindowAttributes};
 
+use crate::declare_components;
+
 pub mod input;
 
 pub type Input = Arc<input::Input>;
@@ -11,6 +13,11 @@ pub type Window = Arc<winit::window::Window>;
 pub trait Game: Send + 'static {
     fn new(event_loop: &winit::event_loop::ActiveEventLoop, input: Input) -> Self;
     fn run(self);
+}
+
+declare_components! {
+    window: crate::app::Window,
+    surface: crate::gpu::Surface,
 }
 
 pub fn init_windows(
@@ -46,7 +53,12 @@ impl<G: Game> ApplicationHandler for App<G> {
         window_id: winit::window::WindowId,
         event: winit::event::WindowEvent,
     ) {
-        _ = (event_loop, window_id, event);
+        _ = (event_loop, window_id);
+        match event {
+            winit::event::WindowEvent::Resized(_) => todo!(),
+            winit::event::WindowEvent::CloseRequested => todo!(),
+            _ => {},
+        }
     }
 
     fn device_event(

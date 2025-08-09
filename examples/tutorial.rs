@@ -1,6 +1,5 @@
 use ure::{
     app::{App, Input, Window, init_windows},
-    data,
     gpu::init_surfaces,
 };
 
@@ -10,6 +9,8 @@ pub enum Actions {
     Jump,
 }
 
+const FRAME_TIME: std::time::Duration = std::time::Duration::from_nanos(0_166_666_667);
+
 fn main() {
     let mut app: App<Game> = App::default();
     let event_loop = winit::event_loop::EventLoop::new().unwrap();
@@ -17,7 +18,7 @@ fn main() {
 }
 
 struct Game {
-    window_data: ure::gpu::Data,
+    window_data: ure::app::Data,
     game_data: ure::game::Data,
     windows: usize,
     input: Input,
@@ -26,8 +27,8 @@ struct Game {
 }
 impl ure::app::Game for Game {
     fn new(event_loop: &winit::event_loop::ActiveEventLoop, input: Input) -> Self {
-        let mut window_data = ure::gpu::Data::default();
-        let windows = window_data.new_span(ure::gpu::SpanMask {
+        let mut window_data = ure::app::Data::default();
+        let windows = window_data.new_span(ure::app::SpanMask {
             window: true,
             surface: true,
             ..Default::default()
@@ -60,10 +61,8 @@ impl ure::app::Game for Game {
                 .unwrap()
                 .fill_with(|| std::mem::MaybeUninit::new(ure::gpu::two::QUAD.load()));
         }
-        let visuals_2d = ure::gpu::two::Visuals2D::new(
-            vec![test_visuals],
-            game_data.visual_2d.elements.len(),
-        );
+        let visuals_2d =
+            ure::gpu::two::Visuals2D::new(vec![test_visuals], game_data.visual_2d.elements.len());
         Game {
             window_data,
             game_data,
@@ -75,7 +74,10 @@ impl ure::app::Game for Game {
     }
 
     fn run(self) {
+        let mut frame_start;
+        let mut delta = std::time::Duration::ZERO;
         loop {
+            frame_start = std::time::Instant::now();
             {
                 let span = self.window_data.get_span(self.windows);
                 let surfaces = span.surface.unwrap();
@@ -96,6 +98,8 @@ impl ure::app::Game for Game {
                 }
                 ure::gpu::present_surfaces(surface_textures);
             }
+            spin_sleep::sleep(FRAME_TIME.saturating_sub(frame_start.elapsed()));
+            delta = frame_start.elapsed();
         }
     }
 }

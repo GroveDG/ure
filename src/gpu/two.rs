@@ -11,7 +11,7 @@ use wgpu::{
 
 use crate::{
     gpu::{Color, GPU},
-    resource::Resource,
+    data::Resource,
 };
 
 pub type MeshHandle2D = Arc<Mesh2D>;
@@ -242,7 +242,7 @@ impl Visuals2D {
             for mesh in span.mesh.unwrap().iter() {
                 mesh.set(pass);
                 pass.draw_indexed(
-                    0..(mesh.indices as u32),
+                    0..mesh.indices,
                     0,
                     buffer_position..buffer_position + 1,
                 );

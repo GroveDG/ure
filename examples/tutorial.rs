@@ -53,9 +53,7 @@ impl ure::app::Game for Game {
             span.visual_2d
                 .unwrap()
                 .fill(std::mem::MaybeUninit::new(ure::gpu::two::Instance2D {
-                    transform_0: glam::Vec2 { x: 1., y: 0. },
-                    transform_1: glam::Vec2 { x: 0., y: 1. },
-                    translation: glam::Vec2::ZERO,
+                    transform: glam::Affine2::IDENTITY.to_cols_array(),
                     color: ure::gpu::Color::WHITE,
                 }));
             span.mesh

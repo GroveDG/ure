@@ -41,9 +41,7 @@ impl Vertex2D {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Instance2D {
-    pub transform_0: glam::Vec2,
-    pub transform_1: glam::Vec2,
-    pub translation: glam::Vec2,
+    pub transform: [f32; 6],
     pub color: Color,
 }
 impl Instance2D {

@@ -1,13 +1,10 @@
-use std::{
-    num::NonZero,
-    sync::{Arc, LazyLock},
-};
+use std::sync::{Arc, LazyLock};
 
 use glam::Vec2;
 use wgpu::{
-    BindGroupDescriptor, BindGroupLayout, BufferBinding, BufferUsages, FragmentState,
-    MultisampleState, PipelineCompilationOptions, RenderPipeline, RenderPipelineDescriptor,
-    VertexAttribute, VertexBufferLayout, VertexState,
+    BindGroupDescriptor, BindGroupLayout, BufferUsages, FragmentState, MultisampleState,
+    PipelineCompilationOptions, RenderPipeline, RenderPipelineDescriptor, VertexAttribute,
+    VertexBufferLayout, VertexState,
     util::{BufferInitDescriptor, DeviceExt},
     wgt::BufferDescriptor,
 };
@@ -23,17 +20,17 @@ pub type MeshHandle2D = Arc<Mesh2D>;
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, PartialEq)]
 pub struct Vertex2D {
     pub position: Vec2,
-    pub color: Color,
     pub uv: Vec2,
+    pub color: Color,
 }
 impl Vertex2D {
     const ATTRIBUTES: &'static [VertexAttribute] = &wgpu::vertex_attr_array![
         // Position
         0 => Float32x2,
-        // Color
-        1 => Float32x4,
         // UV
-        2 => Float32x2,
+        1 => Float32x2,
+        // Color
+        2 => Float32x4,
     ];
     const LAYOUT: VertexBufferLayout<'static> = VertexBufferLayout {
         array_stride: std::mem::size_of::<Self>() as u64,
@@ -69,18 +66,16 @@ impl Instance2D {
 pub static CAMERA_LAYOUT: LazyLock<BindGroupLayout> = LazyLock::new(|| {
     GPU.device
         .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
                 },
-            ],
+                count: None,
+            }],
             label: None,
         })
 });
@@ -143,26 +138,26 @@ pub static QUAD: Resource<Mesh2D> = Resource::new(|| {
             Vertex2D {
                 // Top Left
                 position: Vec2 { x: -0.5, y: 0.5 },
-                color: Color::WHITE,
                 uv: Vec2::ZERO,
+                color: Color::WHITE,
             },
             Vertex2D {
                 // Top Right
                 position: Vec2 { x: -0.5, y: -0.5 },
-                color: Color::WHITE,
                 uv: Vec2::X,
+                color: Color::WHITE,
             },
             Vertex2D {
                 // Bottom Left
                 position: Vec2 { x: 0.5, y: 0.5 },
-                color: Color::WHITE,
                 uv: Vec2::Y,
+                color: Color::WHITE,
             },
             Vertex2D {
                 // Bottom Right
                 position: Vec2 { x: 0.5, y: -0.5 },
-                color: Color::WHITE,
                 uv: Vec2::ONE,
+                color: Color::WHITE,
             },
         ],
         &[0, 1, 2, 2, 1, 3],
@@ -173,6 +168,7 @@ pub static QUAD: Resource<Mesh2D> = Resource::new(|| {
 pub struct Mesh2D {
     pub vertex: wgpu::Buffer,
     pub index: wgpu::Buffer,
+    pub indices: u32,
 }
 
 impl Mesh2D {
@@ -188,6 +184,7 @@ impl Mesh2D {
                 contents: bytemuck::cast_slice(index),
                 usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
             }),
+            indices: index.len() as u32,
         }
     }
     pub fn set<'a>(&self, pass: &mut wgpu::RenderPass<'a>) {
@@ -220,12 +217,10 @@ impl Visuals2D {
             camera: GPU.device.create_bind_group(&BindGroupDescriptor {
                 label: Some("camera"),
                 layout: &CAMERA_LAYOUT,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: camera_buffer.as_entire_binding(),
-                    },
-                ],
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                }],
             }),
             camera_buffer,
         }
@@ -248,8 +243,9 @@ impl Visuals2D {
             let span = data.get_span(span);
             for mesh in span.mesh.unwrap().iter() {
                 mesh.set(pass);
-                pass.draw(
-                    0..((mesh.vertex.size() / (size_of::<Vertex2D>() as u64)) as u32),
+                pass.draw_indexed(
+                    0..(mesh.indices as u32),
+                    0,
                     buffer_position..buffer_position + 1,
                 );
                 buffer_position += 1;

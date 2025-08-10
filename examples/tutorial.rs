@@ -28,16 +28,10 @@ struct Game {
 impl ure::app::Game for Game {
     fn new(event_loop: &winit::event_loop::ActiveEventLoop, input: Input) -> Self {
         let mut window_data = ure::app::Data::default();
-        let windows = window_data.init_span(
-            ure::app::SpanMask {
-                window: true,
-                surface: true,
-                size: true,
-                ..Default::default()
-            },
-            1,
-            |mut span| ure::gpu::init_windows_and_surfaces(&mut span, event_loop),
-        );
+        let windows = window_data.init_span(ure::gpu::MASK, 1, |mut span| {
+            ure::gpu::init_windows_and_surfaces(&mut span, event_loop)
+        });
+        window_data.get_span(windows).window.unwrap()[0].set_title("URE");
         let mut game_data = ure::game::Data::default();
         let test_visuals = game_data.init_span(Visuals2D::MASK, 1, |span| {
             span.visual_2d
@@ -69,7 +63,7 @@ impl ure::app::Game for Game {
             {
                 let span = self.window_data.get_mut_span(self.windows);
                 let surfaces = span.surface.unwrap();
-                ure::gpu::reconfigure_surfaces(surfaces, span.window.unwrap(), span.size.unwrap());
+                ure::gpu::reconfigure_surfaces(surfaces, span.window.unwrap(), span.window_size.unwrap());
                 let surface_textures = ure::gpu::init_surface_textures(surfaces);
                 {
                     let mut encoders = ure::gpu::init_encoders(surfaces.len());

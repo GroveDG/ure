@@ -7,6 +7,8 @@ use wgpu::{
 };
 use winit::dpi::PhysicalSize;
 
+use crate::app::SpanMask;
+
 #[cfg(feature = "2d")]
 pub mod two;
 
@@ -37,7 +39,7 @@ pub fn init_surfaces<'a>(
     }
     unsafe { std::mem::transmute(surfaces) }
 }
-pub fn init_sizes<'a>(
+pub fn init_window_sizes<'a>(
     windows: &[crate::app::Window],
     sizes: &'a mut [MaybeUninit<PhysicalSize<u32>>],
 ) -> &'a mut [PhysicalSize<u32>] {
@@ -53,8 +55,15 @@ pub fn init_windows_and_surfaces(
 ) {
     let window = crate::app::init_windows(span.window.take().unwrap(), event_loop);
     init_surfaces(window, span.surface.take().unwrap());
-    init_sizes(window, span.size.take().unwrap());
+    init_window_sizes(window, span.window_size.take().unwrap());
 }
+
+pub const MASK: SpanMask = SpanMask {
+    window: true,
+    surface: true,
+    window_size: true,
+    ..SpanMask::NONE
+};
 
 pub fn reconfigure_surfaces(
     surfaces: &[Surface],

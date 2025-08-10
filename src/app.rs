@@ -18,7 +18,7 @@ pub trait Game: Send + 'static {
 declare_components! {
     window: crate::app::Window,
     surface: crate::gpu::Surface,
-    size: winit::dpi::PhysicalSize<u32>,
+    window_size: winit::dpi::PhysicalSize<u32>,
 }
 pub fn init_windows<'a>(
     windows: &'a mut [MaybeUninit<Window>],

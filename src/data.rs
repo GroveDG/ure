@@ -97,6 +97,23 @@ impl Data {
             )+
         }
     }
+    pub fn init_span<'a>(&'a mut self, mask: SpanMask, amount: usize, init: impl FnOnce(SpanInit)) -> usize {
+        let span_index = self.new_span(mask);
+        self.grow_span(span_index, amount);
+        let span = self.spans[span_index];
+        $(
+        $(#$attr)?
+        let $component = span.$component.map(|slice_index| {self.$component.extend_slice(slice_index, span.length, amount)});
+        )+
+        self.spans[span_index].length += amount;
+        init(SpanInit {
+            $(
+            $(#$attr)?
+            $component,
+            )+
+        });
+        span_index
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -105,6 +122,22 @@ pub struct SpanMask {
     $(#$attr)?
     pub $component : bool,
     )+
+}
+impl SpanMask {
+    pub const NONE: Self = Self {
+        $(
+        $(#$attr)?
+        $component : false,
+        )+
+    };
+    pub const fn merge(self, other: Self) -> Self {
+        Self {
+            $(
+            $(#$attr)?
+            $component : self.$component || other.$component,
+            )+
+        }
+    }
 }
 #[derive(Debug)]
 pub struct SpanRef<'a> {

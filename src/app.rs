@@ -20,10 +20,10 @@ declare_components! {
     surface: crate::gpu::Surface,
     size: winit::dpi::PhysicalSize<u32>,
 }
-pub fn init_windows(
-    windows: &mut [MaybeUninit<Window>],
+pub fn init_windows<'a>(
+    windows: &'a mut [MaybeUninit<Window>],
     event_loop: &winit::event_loop::ActiveEventLoop,
-) {
+) -> &'a mut [Window] {
     for w in windows.iter_mut() {
         let window = Arc::new(
             event_loop
@@ -32,6 +32,7 @@ pub fn init_windows(
         );
         w.write(window);
     }
+    unsafe { std::mem::transmute(windows) }
 }
 
 pub struct App<G: Game> {
@@ -57,7 +58,7 @@ impl<G: Game> ApplicationHandler for App<G> {
         match event {
             // winit::event::WindowEvent::Resized(_) => todo!(),
             // winit::event::WindowEvent::CloseRequested => todo!(),
-            _ => {},
+            _ => {}
         }
     }
 

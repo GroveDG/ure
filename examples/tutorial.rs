@@ -1,6 +1,6 @@
 use ure::{
-    app::{App, Input, Window, init_windows},
-    gpu::{init_sizes, init_surfaces},
+    app::{App, Input},
+    gpu::two::Visuals2D,
 };
 
 #[repr(usize)]
@@ -28,32 +28,18 @@ struct Game {
 impl ure::app::Game for Game {
     fn new(event_loop: &winit::event_loop::ActiveEventLoop, input: Input) -> Self {
         let mut window_data = ure::app::Data::default();
-        let windows = window_data.new_span(ure::app::SpanMask {
-            window: true,
-            surface: true,
-            size: true,
-            ..Default::default()
-        });
-        window_data.grow_span(windows, 1);
-        {
-            let span = window_data.extend_span(windows, 1);
-            let window = span.window.unwrap();
-            init_windows(window, event_loop);
-            let window: &mut [Window] = unsafe { std::mem::transmute(window) };
-            let surface = span.surface.unwrap();
-            init_surfaces(window, surface);
-            let size = span.size.unwrap();
-            init_sizes(window, size);
-        }
+        let windows = window_data.init_span(
+            ure::app::SpanMask {
+                window: true,
+                surface: true,
+                size: true,
+                ..Default::default()
+            },
+            1,
+            |mut span| ure::gpu::init_windows_and_surfaces(&mut span, event_loop),
+        );
         let mut game_data = ure::game::Data::default();
-        let test_visuals = game_data.new_span(ure::game::SpanMask {
-            visual_2d: true,
-            mesh: true,
-            ..Default::default()
-        });
-        game_data.grow_span(test_visuals, 1);
-        {
-            let span = game_data.extend_span(test_visuals, 1);
+        let test_visuals = game_data.init_span(Visuals2D::MASK, 1, |span| {
             span.visual_2d
                 .unwrap()
                 .fill(std::mem::MaybeUninit::new(ure::gpu::two::Instance2D {
@@ -63,9 +49,8 @@ impl ure::app::Game for Game {
             span.mesh
                 .unwrap()
                 .fill_with(|| std::mem::MaybeUninit::new(ure::gpu::two::QUAD.load()));
-        }
-        let visuals_2d =
-            ure::gpu::two::Visuals2D::new(vec![test_visuals], game_data.visual_2d.elements.len());
+        });
+        let visuals_2d = Visuals2D::new(vec![test_visuals], game_data.visual_2d.elements.len());
         Game {
             window_data,
             game_data,

@@ -2,8 +2,8 @@ use std::mem::MaybeUninit;
 
 use color::Srgb;
 use wgpu::{
-    CommandEncoder, Device, DeviceDescriptor, Instance, InstanceDescriptor, Queue,
-    RenderPassDescriptor, RequestAdapterOptions, SurfaceTexture, wgt::SurfaceConfiguration,
+    Adapter, CommandEncoder, Device, DeviceDescriptor, Instance, InstanceDescriptor, Queue,
+    RenderPassDescriptor, RequestAdapterOptions, SurfaceTexture,
 };
 use winit::dpi::PhysicalSize;
 
@@ -19,31 +19,41 @@ pub static GPU: std::sync::LazyLock<Gpu> =
 
 pub type Color = color::AlphaColor<Srgb>;
 
-pub fn init_surfaces(windows: &[crate::app::Window], surfaces: &mut [MaybeUninit<Surface>]) {
+pub fn init_surfaces<'a>(
+    windows: &[crate::app::Window],
+    surfaces: &'a mut [MaybeUninit<Surface>],
+) -> &'a mut [Surface] {
     for i in 0..windows.len() {
         let window = windows[i].clone();
         let size = window.inner_size();
         let surface = GPU.instance.create_surface(window).unwrap();
         surface.configure(
             &GPU.device,
-            &SurfaceConfiguration {
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                format: SURFACE_FORMAT,
-                view_formats: vec![],
-                alpha_mode: wgpu::CompositeAlphaMode::Auto,
-                width: size.width,
-                height: size.height,
-                desired_maximum_frame_latency: 2,
-                present_mode: wgpu::PresentMode::Mailbox,
-            },
+            &surface
+                .get_default_config(&GPU.adapter, size.width, size.height)
+                .unwrap(),
         );
         surfaces[i].write(surface);
     }
+    unsafe { std::mem::transmute(surfaces) }
 }
-pub fn init_sizes(windows: &[crate::app::Window], sizes: &mut [MaybeUninit<PhysicalSize<u32>>]) {
+pub fn init_sizes<'a>(
+    windows: &[crate::app::Window],
+    sizes: &'a mut [MaybeUninit<PhysicalSize<u32>>],
+) -> &'a mut [PhysicalSize<u32>] {
     for i in 0..windows.len() {
         sizes[i].write(windows[i].inner_size());
     }
+    unsafe { std::mem::transmute(sizes) }
+}
+
+pub fn init_windows_and_surfaces(
+    span: &mut crate::app::SpanInit,
+    event_loop: &winit::event_loop::ActiveEventLoop,
+) {
+    let window = crate::app::init_windows(span.window.take().unwrap(), event_loop);
+    init_surfaces(window, span.surface.take().unwrap());
+    init_sizes(window, span.size.take().unwrap());
 }
 
 pub fn reconfigure_surfaces(
@@ -57,16 +67,9 @@ pub fn reconfigure_surfaces(
             sizes[i] = size;
             surfaces[i].configure(
                 &GPU.device,
-                &SurfaceConfiguration {
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                    format: SURFACE_FORMAT,
-                    view_formats: vec![],
-                    alpha_mode: wgpu::CompositeAlphaMode::Auto,
-                    width: size.width,
-                    height: size.height,
-                    desired_maximum_frame_latency: 2,
-                    present_mode: wgpu::PresentMode::Mailbox,
-                },
+                &surfaces[i]
+                    .get_default_config(&GPU.adapter, size.width, size.height)
+                    .unwrap(),
             );
         }
     }
@@ -74,7 +77,7 @@ pub fn reconfigure_surfaces(
 
 pub fn init_encoders(amount: usize) -> Vec<CommandEncoder> {
     let mut encoders = Vec::with_capacity(amount);
-    for _i in 0..amount {
+    for _ in 0..amount {
         encoders.push(GPU.device.create_command_encoder(&Default::default()))
     }
     encoders
@@ -94,27 +97,26 @@ pub fn begin_passes<'a>(
     color: wgpu::Color,
 ) -> Vec<wgpu::RenderPass<'a>> {
     let mut passes = Vec::with_capacity(encoders.len());
-    for (surface_texture, encoder) in surface_textures.iter().zip(encoders) {
+    for (i, encoder) in encoders.iter_mut().enumerate() {
         passes.push(encoder.begin_render_pass(&RenderPassDescriptor {
             label: None,
-            color_attachments:
-                &[
-                    Some(
-                        wgpu::RenderPassColorAttachment {
-                            view: &surface_texture.texture.create_view(
-                                &wgpu::TextureViewDescriptor {
-                                    format: Some(SURFACE_FORMAT),
-                                    ..Default::default()
-                                },
-                            ),
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(color),
-                                store: wgpu::StoreOp::Store,
+            color_attachments: &[
+                Some(
+                    wgpu::RenderPassColorAttachment {
+                        view: &surface_textures[i].texture.create_view(
+                            &wgpu::TextureViewDescriptor {
+                                format: Some(SURFACE_FORMAT),
+                                ..Default::default()
                             },
+                        ),
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(color),
+                            store: wgpu::StoreOp::Store,
                         },
-                    ),
-                ],
+                    },
+                ),
+            ],
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
@@ -136,6 +138,7 @@ pub fn present_surfaces(surface_textures: Vec<SurfaceTexture>) {
 
 pub struct Gpu {
     pub instance: Instance,
+    pub adapter: Adapter,
     pub device: Device,
     pub queue: Queue,
 }
@@ -152,6 +155,7 @@ impl Gpu {
             .unwrap();
         Self {
             instance,
+            adapter,
             device,
             queue,
         }

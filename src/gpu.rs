@@ -5,11 +5,10 @@ use wgpu::{
     CommandEncoder, Device, DeviceDescriptor, Instance, InstanceDescriptor, Queue,
     RenderPassDescriptor, RequestAdapterOptions, SurfaceTexture, wgt::SurfaceConfiguration,
 };
+use winit::dpi::PhysicalSize;
 
 #[cfg(feature = "2d")]
 pub mod two;
-
-use crate::declare_components;
 
 pub type Surface = wgpu::Surface<'static>;
 
@@ -20,13 +19,11 @@ pub static GPU: std::sync::LazyLock<Gpu> =
 
 pub type Color = color::AlphaColor<Srgb>;
 
-pub fn init_surfaces(
-    windows: &[crate::app::Window],
-    surfaces: &mut [MaybeUninit<Surface>],
-) {
-    for (w, s) in windows.iter().zip(surfaces.iter_mut()) {
-        let size = w.inner_size();
-        let surface = GPU.instance.create_surface(w.clone()).unwrap();
+pub fn init_surfaces(windows: &[crate::app::Window], surfaces: &mut [MaybeUninit<Surface>]) {
+    for i in 0..windows.len() {
+        let window = windows[i].clone();
+        let size = window.inner_size();
+        let surface = GPU.instance.create_surface(window).unwrap();
         surface.configure(
             &GPU.device,
             &SurfaceConfiguration {
@@ -40,7 +37,38 @@ pub fn init_surfaces(
                 present_mode: wgpu::PresentMode::Mailbox,
             },
         );
-        s.write(surface);
+        surfaces[i].write(surface);
+    }
+}
+pub fn init_sizes(windows: &[crate::app::Window], sizes: &mut [MaybeUninit<PhysicalSize<u32>>]) {
+    for i in 0..windows.len() {
+        sizes[i].write(windows[i].inner_size());
+    }
+}
+
+pub fn reconfigure_surfaces(
+    surfaces: &[Surface],
+    windows: &[crate::app::Window],
+    sizes: &mut [PhysicalSize<u32>],
+) {
+    for i in 0..surfaces.len() {
+        let size = windows[i].inner_size();
+        if size != sizes[i] {
+            sizes[i] = size;
+            surfaces[i].configure(
+                &GPU.device,
+                &SurfaceConfiguration {
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    format: SURFACE_FORMAT,
+                    view_formats: vec![],
+                    alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                    width: size.width,
+                    height: size.height,
+                    desired_maximum_frame_latency: 2,
+                    present_mode: wgpu::PresentMode::Mailbox,
+                },
+            );
+        }
     }
 }
 

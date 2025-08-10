@@ -10,8 +10,8 @@ use wgpu::{
 };
 
 use crate::{
-    gpu::{Color, GPU},
     data::Resource,
+    gpu::{Color, GPU},
 };
 
 pub type MeshHandle2D = Arc<Mesh2D>;
@@ -241,13 +241,16 @@ impl Visuals2D {
             let span = data.get_span(span);
             for mesh in span.mesh.unwrap().iter() {
                 mesh.set(pass);
-                pass.draw_indexed(
-                    0..mesh.indices,
-                    0,
-                    buffer_position..buffer_position + 1,
-                );
+                pass.draw_indexed(0..mesh.indices, 0, buffer_position..buffer_position + 1);
                 buffer_position += 1;
             }
         }
+    }
+    pub fn set_camera(&mut self, transform: &glam::Affine2) {
+        GPU.queue.write_buffer(
+            &self.camera_buffer,
+            0,
+            bytemuck::cast_slice(&transform.to_cols_array()),
+        );
     }
 }

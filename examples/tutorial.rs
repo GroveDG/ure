@@ -1,6 +1,6 @@
 use ure::{
     app::{App, Input, Window, init_windows},
-    gpu::init_surfaces,
+    gpu::{init_sizes, init_surfaces},
 };
 
 #[repr(usize)]
@@ -9,7 +9,7 @@ pub enum Actions {
     Jump,
 }
 
-const FRAME_TIME: std::time::Duration = std::time::Duration::from_nanos(0_166_666_667);
+const FRAME_TIME: std::time::Duration = std::time::Duration::from_nanos(0_016_666_667);
 
 fn main() {
     let mut app: App<Game> = App::default();
@@ -31,16 +31,19 @@ impl ure::app::Game for Game {
         let windows = window_data.new_span(ure::app::SpanMask {
             window: true,
             surface: true,
+            size: true,
             ..Default::default()
         });
         window_data.grow_span(windows, 1);
         {
             let span = window_data.extend_span(windows, 1);
             let window = span.window.unwrap();
-            let surface = span.surface.unwrap();
             init_windows(window, event_loop);
             let window: &mut [Window] = unsafe { std::mem::transmute(window) };
+            let surface = span.surface.unwrap();
             init_surfaces(window, surface);
+            let size = span.size.unwrap();
+            init_sizes(window, size);
         }
         let mut game_data = ure::game::Data::default();
         let test_visuals = game_data.new_span(ure::game::SpanMask {
@@ -73,14 +76,15 @@ impl ure::app::Game for Game {
         }
     }
 
-    fn run(self) {
+    fn run(mut self) {
         let mut frame_start;
         let mut delta = std::time::Duration::ZERO;
         loop {
             frame_start = std::time::Instant::now();
             {
-                let span = self.window_data.get_span(self.windows);
+                let span = self.window_data.get_mut_span(self.windows);
                 let surfaces = span.surface.unwrap();
+                ure::gpu::reconfigure_surfaces(surfaces, span.window.unwrap(), span.size.unwrap());
                 let surface_textures = ure::gpu::init_surface_textures(surfaces);
                 {
                     let mut encoders = ure::gpu::init_encoders(surfaces.len());

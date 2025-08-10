@@ -18,8 +18,8 @@ pub trait Game: Send + 'static {
 declare_components! {
     window: crate::app::Window,
     surface: crate::gpu::Surface,
+    size: winit::dpi::PhysicalSize<u32>,
 }
-
 pub fn init_windows(
     windows: &mut [MaybeUninit<Window>],
     event_loop: &winit::event_loop::ActiveEventLoop,
@@ -55,8 +55,8 @@ impl<G: Game> ApplicationHandler for App<G> {
     ) {
         _ = (event_loop, window_id);
         match event {
-            winit::event::WindowEvent::Resized(_) => todo!(),
-            winit::event::WindowEvent::CloseRequested => todo!(),
+            // winit::event::WindowEvent::Resized(_) => todo!(),
+            // winit::event::WindowEvent::CloseRequested => todo!(),
             _ => {},
         }
     }

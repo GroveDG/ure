@@ -7,7 +7,7 @@ use wgpu::{
 };
 use winit::dpi::PhysicalSize;
 
-use crate::app::SpanMask;
+use crate::app::{SpanInit, SpanMask, Window, init_windows};
 
 #[cfg(feature = "2d")]
 pub mod two;
@@ -22,7 +22,7 @@ pub static GPU: std::sync::LazyLock<Gpu> =
 pub type Color = color::AlphaColor<Srgb>;
 
 pub fn init_surfaces<'a>(
-    windows: &[crate::app::Window],
+    windows: &[Window],
     surfaces: &'a mut [MaybeUninit<Surface>],
 ) -> &'a mut [Surface] {
     for i in 0..windows.len() {
@@ -40,7 +40,7 @@ pub fn init_surfaces<'a>(
     unsafe { std::mem::transmute(surfaces) }
 }
 pub fn init_window_sizes<'a>(
-    windows: &[crate::app::Window],
+    windows: &[Window],
     sizes: &'a mut [MaybeUninit<PhysicalSize<u32>>],
 ) -> &'a mut [PhysicalSize<u32>] {
     for i in 0..windows.len() {
@@ -50,10 +50,10 @@ pub fn init_window_sizes<'a>(
 }
 
 pub fn init_windows_and_surfaces(
-    span: &mut crate::app::SpanInit,
+    span: &mut SpanInit,
     event_loop: &winit::event_loop::ActiveEventLoop,
 ) {
-    let window = crate::app::init_windows(span.window.take().unwrap(), event_loop);
+    let window = init_windows(span.window.take().unwrap(), event_loop);
     init_surfaces(window, span.surface.take().unwrap());
     init_window_sizes(window, span.window_size.take().unwrap());
 }
@@ -67,7 +67,7 @@ pub const MASK: SpanMask = SpanMask {
 
 pub fn reconfigure_surfaces(
     surfaces: &[Surface],
-    windows: &[crate::app::Window],
+    windows: &[Window],
     sizes: &mut [PhysicalSize<u32>],
 ) {
     for i in 0..surfaces.len() {

@@ -1,8 +1,8 @@
 use std::{marker::PhantomData, mem::MaybeUninit, sync::Arc};
 
-use winit::{application::ApplicationHandler, window::WindowAttributes};
+use winit::{application::ApplicationHandler, dpi::PhysicalSize, window::WindowAttributes};
 
-use crate::declare_components;
+use crate::{declare_components, gpu::Surface};
 
 pub mod input;
 
@@ -16,9 +16,9 @@ pub trait Game: Send + 'static {
 }
 
 declare_components! {
-    window: crate::app::Window,
-    surface: crate::gpu::Surface,
-    window_size: winit::dpi::PhysicalSize<u32>,
+    window: Window,
+    surface: Surface,
+    window_size: PhysicalSize<u32>,
 }
 pub fn init_windows<'a>(
     windows: &'a mut [MaybeUninit<Window>],

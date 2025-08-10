@@ -10,8 +10,7 @@ use wgpu::{
 };
 
 use crate::{
-    data::Resource,
-    gpu::{Color, GPU},
+    data::Resource, game::{Data, SpanInit, SpanMask}, gpu::{Color, GPU}
 };
 
 pub type MeshHandle2D = Arc<Mesh2D>;
@@ -97,10 +96,10 @@ pub struct Visuals2D {
     camera: wgpu::BindGroup,
 }
 impl Visuals2D {
-    pub const MASK: crate::game::SpanMask = crate::game::SpanMask {
+    pub const MASK: SpanMask = SpanMask {
         mesh: true,
         visual_2d: true,
-        ..crate::game::SpanMask::NONE
+        ..SpanMask::NONE
     };
     pub fn new(spans: Vec<usize>, len: usize) -> Self {
         let camera_buffer = GPU.device.create_buffer_init(&BufferInitDescriptor {
@@ -127,12 +126,12 @@ impl Visuals2D {
             camera_buffer,
         }
     }
-    pub fn init(span: crate::game::SpanInit, mesh: Arc<Mesh2D>) {
+    pub fn init(span: SpanInit, mesh: Arc<Mesh2D>) {
         for m in span.mesh.unwrap() {
             m.write(mesh.clone());
         }
     }
-    pub fn render<'a>(&self, data: &crate::game::Data, pass: &mut wgpu::RenderPass<'a>) {
+    pub fn render<'a>(&self, data: &Data, pass: &mut wgpu::RenderPass<'a>) {
         GPU.queue.write_buffer(
             &self.instance_buffer,
             0,

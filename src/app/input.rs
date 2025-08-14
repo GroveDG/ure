@@ -4,13 +4,19 @@ use rustc_hash::FxHashMap;
 
 use winit::{
     event::{DeviceEvent, DeviceId},
-    keyboard::PhysicalKey,
+    keyboard::PhysicalKey, window::WindowId,
 };
 
 #[derive(Debug, Default)]
 pub struct Input {
     input_map: Mutex<InputMap>,
     player_actions: Mutex<PlayerActions>,
+    window_input: Mutex<WindowInput>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct WindowInput {
+    pub close: BitVec,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -18,7 +24,8 @@ pub struct InputMap {
     pub key_map: FxHashMap<PhysicalKey, usize>,
     pub button_map: FxHashMap<u32, usize>,
     pub axis_map: FxHashMap<u32, usize>,
-    pub device_map: FxHashMap<winit::event::DeviceId, usize>,
+    pub device_map: FxHashMap<DeviceId, usize>,
+    pub window_map: FxHashMap<WindowId, usize>
 }
 
 #[derive(Debug, Default, Clone)]

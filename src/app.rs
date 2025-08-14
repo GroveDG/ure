@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, mem::MaybeUninit, sync::Arc};
 
-use winit::{application::ApplicationHandler, dpi::PhysicalSize, window::WindowAttributes};
+use winit::{application::ApplicationHandler, dpi::PhysicalSize, event_loop::{ActiveEventLoop, EventLoopProxy}, window::WindowAttributes};
 
 use crate::{declare_components, gpu::Surface};
 
@@ -10,19 +10,22 @@ pub type Input = Arc<input::Input>;
 
 pub type Window = Arc<winit::window::Window>;
 
-pub trait Game: Send + 'static {
-    fn new(event_loop: &winit::event_loop::ActiveEventLoop, input: Input) -> Self;
-    fn run(self);
-}
-
 declare_components! {
     window: Window,
     surface: Surface,
     window_size: PhysicalSize<u32>,
 }
+
+pub trait Game: Send + 'static {
+    type Event;
+
+    fn new(event_loop: &ActiveEventLoop, proxy: EventLoopProxy<Self::Event>, input: Input) -> Self;
+    fn run(self);
+    fn event(event_loop: &ActiveEventLoop, event: Self::Event);
+}
 pub fn init_windows<'a>(
     windows: &'a mut [MaybeUninit<Window>],
-    event_loop: &winit::event_loop::ActiveEventLoop,
+    event_loop: &ActiveEventLoop,
 ) -> &'a mut [Window] {
     for w in windows.iter_mut() {
         let window = Arc::new(
@@ -37,12 +40,13 @@ pub fn init_windows<'a>(
 
 pub struct App<G: Game> {
     game: Option<std::thread::JoinHandle<()>>,
+    proxy: EventLoopProxy<G::Event>,
     _marker: PhantomData<G>,
     input: Input,
 }
-impl<G: Game> ApplicationHandler for App<G> {
+impl<G: Game> ApplicationHandler<G::Event> for App<G> {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        let game = G::new(event_loop, self.input.clone());
+        let game = G::new(event_loop,self.proxy.clone(), self.input.clone());
         self.game = Some(std::thread::spawn(move || {
             game.run();
         }));
@@ -70,6 +74,10 @@ impl<G: Game> ApplicationHandler for App<G> {
     ) {
         self.input.process_device_event(&device_id, event);
     }
+    
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: G::Event) {
+        G::event(event_loop, event);
+    }
 
     fn exiting(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         if let Some(game) = self.game.take() {
@@ -78,10 +86,11 @@ impl<G: Game> ApplicationHandler for App<G> {
     }
 }
 
-impl<G: Game> Default for App<G> {
-    fn default() -> Self {
+impl<G: Game> App<G> {
+    pub fn new(proxy: EventLoopProxy<G::Event>) -> Self {
         Self {
             game: Default::default(),
+            proxy,
             _marker: Default::default(),
             input: Default::default(),
         }

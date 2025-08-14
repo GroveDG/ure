@@ -2,6 +2,7 @@ use ure::{
     app::{App, Input},
     gpu::two::Visuals2D,
 };
+use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 
 #[repr(usize)]
 #[derive(Debug, Clone, Copy)]
@@ -12,8 +13,8 @@ pub enum Actions {
 const FRAME_TIME: std::time::Duration = std::time::Duration::from_nanos(0_016_666_667);
 
 fn main() {
-    let mut app: App<Game> = App::default();
-    let event_loop = winit::event_loop::EventLoop::new().unwrap();
+    let event_loop = EventLoop::with_user_event().build().unwrap();
+    let mut app: App<Game> = App::new(event_loop.create_proxy());
     event_loop.run_app(&mut app).unwrap();
 }
 
@@ -25,8 +26,15 @@ struct Game {
     test_visuals: usize,
     visuals_2d: ure::gpu::two::Visuals2D,
 }
+
+pub enum Event {
+    Exit,
+}
+
 impl ure::app::Game for Game {
-    fn new(event_loop: &winit::event_loop::ActiveEventLoop, input: Input) -> Self {
+    type Event = Event;
+
+    fn new(event_loop: &ActiveEventLoop, proxy: EventLoopProxy<Self::Event>, input: Input) -> Self {
         let mut window_data = ure::app::Data::default();
         let windows = window_data.init_span(ure::gpu::MASK, 1, |mut span| {
             ure::gpu::init_windows_and_surfaces(&mut span, event_loop)
@@ -63,7 +71,11 @@ impl ure::app::Game for Game {
             {
                 let span = self.window_data.get_mut_span(self.windows);
                 let surfaces = span.surface.unwrap();
-                ure::gpu::reconfigure_surfaces(surfaces, span.window.unwrap(), span.window_size.unwrap());
+                ure::gpu::reconfigure_surfaces(
+                    surfaces,
+                    span.window.unwrap(),
+                    span.window_size.unwrap(),
+                );
                 let surface_textures = ure::gpu::init_surface_textures(surfaces);
                 {
                     let mut encoders = ure::gpu::init_encoders(surfaces.len());
@@ -83,6 +95,12 @@ impl ure::app::Game for Game {
             }
             spin_sleep::sleep(FRAME_TIME.saturating_sub(frame_start.elapsed()));
             delta = frame_start.elapsed();
+        }
+    }
+
+    fn event(event_loop: &ActiveEventLoop, event: Self::Event) {
+        match event {
+            Event::Exit => event_loop.exit(),
         }
     }
 }

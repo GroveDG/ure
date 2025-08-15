@@ -1,4 +1,9 @@
-use std::sync::{Arc, Weak};
+use std::{
+    any::Any,
+    fmt::Debug,
+    mem::ManuallyDrop,
+    sync::{Arc, Weak},
+};
 
 use parking_lot::Mutex;
 
@@ -24,229 +29,167 @@ impl<T, F: Fn() -> T> Resource<T, F> {
     }
 }
 
-#[macro_export]
-macro_rules! declare_components {
-    ($($(#$attr:tt)? $component:ident : $t:ty,)+ $(,)?) => {
-#[derive(Debug, Default)]
+// The following is heavily based off of the slotmap crate.
+
+pub type Compartment = Option<Box<dyn Any>>;
+pub type Element = Vec<Compartment>;
+pub type Generation = u32;
+pub type Index = usize;
+pub type Key = (Generation, Index);
+
+/// We don't store both the previously freed index and an
+/// element at the same time.
+union SlotData {
+    prev_freed: Index,
+    element: ManuallyDrop<Element>,
+}
+
+struct Slot {
+    generation: Generation,
+    data: SlotData,
+}
+impl Slot {
+    #[inline]
+    fn occupied(&self) -> bool {
+        // if the generation is event it's empty
+        // if the generation is odd it's occupied
+        self.generation & 1 == 0
+    }
+    #[inline]
+    fn new(element: Element) -> Self {
+        Self {
+            generation: 0,
+            data: SlotData {
+                element: ManuallyDrop::new(element),
+            },
+        }
+    }
+    #[inline]
+    unsafe fn increment(&mut self) -> Generation {
+        self.generation = self.generation.wrapping_add(1);
+        self.generation
+    }
+    #[inline]
+    // Does NOT return Key. These Generation and Index are unrelated.
+    unsafe fn set(&mut self, element: Element) -> (Generation, Index) {
+        let prev_freed = unsafe { self.data.prev_freed };
+        self.data.element = ManuallyDrop::new(element);
+        (unsafe { self.increment() }, prev_freed)
+    }
+    #[inline]
+    fn take(&mut self, generation: Generation, prev_freed: Index) -> Option<Element> {
+        if self.generation == generation {
+            unsafe { self.increment() };
+            let element = unsafe { ManuallyDrop::take(&mut self.data.element) };
+            self.data.prev_freed = prev_freed;
+            Some(element)
+        } else {
+            None
+        }
+    }
+}
+impl Drop for Slot {
+    fn drop(&mut self) {
+        if self.occupied() {
+            unsafe { ManuallyDrop::drop(&mut self.data.element) }
+        }
+    }
+}
+impl Debug for Slot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Slot")
+            .field("generation", &self.generation)
+            .field("data", unsafe {
+                if self.occupied() {
+                    &self.data.element
+                } else {
+                    &self.data.prev_freed
+                }
+            })
+            .finish()
+    }
+}
+
+/// General purpose data structure compromising between Data and Object Orientation.
+/// 
+/// Data is grouped into [Elements](Element). These are elements in the sense that they
+/// aren't just entities. Elements are composed of [Compartments](Compartment) which are
+/// a collection of components. Elements are designed to be *groups* not single entities.
+/// 
+/// Compartments are [`dyn Any`](Any) internally. This means they need to be downcast
+/// when accessed.
+/// - In object orientation, it is assumed that you know what types the compartments are.
+/// - In data orientation, our primary iterator iterates through [discriminants](CompartmentDiscriminant).
+/// Discriminants allow us to quickly filter out all Elements that do not contain a
+/// particular component and then downcast when necessary.
+/// 
+/// In order to allow highly-dynamic programs (like editors), the component-wise axis is
+/// a [Vec]. This means components should be enumerated to be given indices. These indices
+/// are implictly associated with an instance of [Data] and it is an error to use it
+/// elsewhere.
+#[derive(Debug)]
 pub struct Data {
-    pub spans: Vec<Span>,
-$(
-    $(#$attr)?
-    pub $component : $crate::data::Slicer<$t>,
-)+}
+    elements: Vec<Slot>, //                                 Element then Component
+    discriminants: Vec<Vec<CompartmentDiscriminant>>, //    Component then Element
+    first_open: usize,
+    total_open: usize,
+}
 
 impl Data {
-    pub fn new_span(&mut self, mask: SpanMask) -> usize {
-        let length = self.spans.len();
-        self.spans.push(Span {
-            length: 0,
-            $(
-            $(#$attr)?
-            $component: if mask.$component { Some(self.$component.init_slice()) } else { None },
-            )+
-        });
-        length
-    }
-    pub fn grow_span(&mut self, span_index: usize, additional: usize) {
-        let span = self.spans[span_index];
-        $(
-        $(#$attr)?
-        if let Some(slice_index) = span.$component {
-            self.$component.grow_slice(slice_index, additional);
-        }
-        )+
-    }
-    pub fn shrink_span(&mut self, span_index: usize, reduction: usize) {
-        let span = self.spans[span_index];
-        $(
-        $(#$attr)?
-        if let Some(slice_index) = span.$component {
-            self.$component.shrink_slice(slice_index, reduction);
-        }
-        )+
-    }
-    pub fn get_span<'a>(&'a self, span_index: usize) -> SpanRef<'a> {
-        let span = self.spans[span_index];
-        SpanRef {
-        $(
-        $(#$attr)?
-        $component: span.$component.map(|slice_index| {self.$component.get_slice(slice_index, span.length)}),
-        )+
-        }
-    }
-    pub fn get_mut_span<'a>(&'a mut self, span_index: usize) -> SpanMut<'a> {
-        let span = self.spans[span_index];
-        SpanMut {
-        $(
-        $(#$attr)?
-        $component: span.$component.map(|slice_index| {self.$component.get_mut_slice(slice_index, span.length)}),
-        )+
-        }
-    }
-    pub fn extend_span<'a>(&'a mut self, span_index: usize, amount: usize) -> SpanInit<'a> {
-        let span = self.spans[span_index];
-        $(
-        $(#$attr)?
-        let $component = span.$component.map(|slice_index| {self.$component.extend_slice(slice_index, span.length, amount)});
-        )+
-        self.spans[span_index].length += amount;
-        SpanInit {
-            $(
-            $(#$attr)?
-            $component,
-            )+
-        }
-    }
-    pub fn init_span<'a>(&'a mut self, mask: SpanMask, amount: usize, init: impl FnOnce(SpanInit)) -> usize {
-        let span_index = self.new_span(mask);
-        self.grow_span(span_index, amount);
-        let span = self.spans[span_index];
-        $(
-        $(#$attr)?
-        let $component = span.$component.map(|slice_index| {self.$component.extend_slice(slice_index, span.length, amount)});
-        )+
-        self.spans[span_index].length += amount;
-        init(SpanInit {
-            $(
-            $(#$attr)?
-            $component,
-            )+
-        });
-        span_index
-    }
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct SpanMask {
-    $(
-    $(#$attr)?
-    pub $component : bool,
-    )+
-}
-impl SpanMask {
-    pub const NONE: Self = Self {
-        $(
-        $(#$attr)?
-        $component : false,
-        )+
-    };
-    pub const fn merge(self, other: Self) -> Self {
-        Self {
-            $(
-            $(#$attr)?
-            $component : self.$component || other.$component,
-            )+
-        }
-    }
-}
-#[derive(Debug)]
-pub struct SpanRef<'a> {
-    $(
-    $(#$attr)?
-    pub $component : Option<&'a [$t]>,
-    )+
-}
-#[derive(Debug)]
-pub struct SpanMut<'a> {
-    $(
-    $(#$attr)?
-    pub $component : Option<&'a mut [$t]>,
-    )+
-}
-#[derive(Debug)]
-pub struct SpanInit<'a> {
-    $(
-    $(#$attr)?
-    pub $component : Option<&'a mut [std::mem::MaybeUninit<$t>]>,
-    )+
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Span {
-    pub length: usize,
-    $(
-    $(#$attr)?
-    pub $component : Option<usize>,
-    )+
-}
-
-impl Drop for Data {
-    fn drop(&mut self) {
-        for span in self.spans.iter() {
-            let length = span.length;
-            $(
-            $(#$attr)?
-            if let Some(index) = span.$component {
-                for component in self.$component.get_mut_slice(index, length) {
-                    unsafe {
-                        std::ptr::drop_in_place(component as *mut $t);
-                    }
-                }
-            }
-            )+
-        }
-    }
-}
-    };
-}
-
-#[derive(Debug)] // Default impl manually
-pub struct Slicer<T> {
-    pub elements: Vec<std::mem::MaybeUninit<T>>,
-    pub positions: Vec<usize>,
-}
-
-impl<T> Slicer<T> {
-    pub fn init_slice(&mut self) -> usize {
-        self.positions.push(self.elements.len());
-        self.positions.len() - 1
-    }
-    pub fn grow_slice(&mut self, index: usize, additional: usize) {
-        self.elements.reserve(additional);
-        unsafe {
-            self.elements.set_len(self.elements.len() + additional);
-        }
-
-        let start = self.positions[index];
-        self.elements[start..].rotate_right(additional);
-
-        for position in &mut self.positions[index + 1..] {
-            *position += additional;
-        }
-    }
-    pub fn shrink_slice(&mut self, index: usize, reduce: usize) {
-        self.elements.truncate(self.elements.len() - reduce);
-
-        let start = self.positions[index];
-        self.elements[start..].rotate_left(reduce);
-
-        for position in &mut self.positions[index + 1..] {
-            *position -= reduce;
-        }
-    }
-    pub fn get_slice(&self, index: usize, length: usize) -> &[T] {
-        let position = self.positions[index];
-        unsafe { std::mem::transmute(&self.elements[position..position + length]) }
-    }
-    pub fn get_mut_slice(&mut self, index: usize, length: usize) -> &mut [T] {
-        let position = self.positions[index];
-        unsafe { std::mem::transmute(&mut self.elements[position..position + length]) }
-    }
-    pub fn extend_slice(
-        &mut self,
-        index: usize,
-        length: usize,
-        additional: usize,
-    ) -> &mut [std::mem::MaybeUninit<T>] {
-        let position = self.positions[index] + length;
-        &mut self.elements[position..position + additional]
-    }
-}
-impl<T> Default for Slicer<T> {
-    fn default() -> Self {
+    pub fn new(num_components: usize) -> Self {
         Self {
             elements: Default::default(),
-            positions: Default::default(),
+            discriminants: vec![Default::default(); num_components],
+            first_open: Default::default(),
+            total_open: Default::default(),
         }
     }
+
+    pub fn push(&mut self, element: Element, discriminants: &[CompartmentDiscriminant]) -> Key {
+        debug_assert!(self.discriminants.len() == discriminants.len());
+        debug_assert!(self.discriminants.len() == element.len());
+
+        // If there are no empty slots to fill...
+        if self.total_open == 0 {
+            let index = self.elements.len(); //     New element is last
+            self.elements.push(Slot::new(element)); //     Push the element
+            // Push the discriminants
+            for (c, discriminant) in discriminants.iter().enumerate() {
+                self.discriminants[c].push(*discriminant);
+            }
+            (0, index) // New slots are generation 0
+        } else {
+            // If there are empty slots to fill...
+            self.total_open -= 1; //                       Take an empty slot
+            let index = self.first_open; //         Use the slot we know is empty
+            // Fill the slot and take its information.
+            let (generation, prev_freed) = unsafe { self.elements[index].set(element) };
+            self.first_open = prev_freed; // Set the known empty slot to the one freed before this one
+            // Set the discriminants
+            for (c, discriminant) in discriminants.iter().enumerate() {
+                self.discriminants[c][index] = *discriminant;
+            }
+            (generation, index)
+        }
+    }
+
+    pub fn remove_element(&mut self, key: Key) -> Option<Element> {
+        let (generation, index) = key;
+        let element = self.elements[index].take(generation, self.first_open);
+        if element.is_some() {
+            // If the element was there...
+            self.total_open += 1; //        Add an empty slot
+            self.first_open = index; //     Remember this empty slot
+        }
+        element
+    }
+}
+
+#[derive(Debug, Clone, Copy, Hash)]
+#[repr(u8)]
+pub enum CompartmentDiscriminant {
+    None,
+    One,
+    Vec,
+    Array,
 }

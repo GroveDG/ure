@@ -1,6 +1,5 @@
 use ure::{
-    app::{App, Input},
-    gpu::two::Visuals2D,
+    app::{App, Input}, data::{Data, Key}, gpu::two::Visuals2D
 };
 use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 
@@ -20,10 +19,10 @@ fn main() {
 
 struct Game {
     window_data: ure::app::Data,
-    game_data: ure::game::Data,
-    windows: usize,
+    game_data: Data,
+    windows: Key,
     input: Input,
-    test_visuals: usize,
+    test_visuals: Key,
     visuals_2d: ure::gpu::two::Visuals2D,
 }
 

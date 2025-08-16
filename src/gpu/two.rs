@@ -1,8 +1,12 @@
-use std::sync::{Arc, LazyLock};
+use std::{
+    num::NonZero,
+    sync::{Arc, LazyLock},
+};
 
-use glam::Vec2;
+use glam::{Affine2, Vec2};
+use rustc_hash::FxHashSet;
 use wgpu::{
-    BindGroupDescriptor, BindGroupLayout, BufferUsages, FragmentState, MultisampleState,
+    BindGroupDescriptor, BindGroupLayout, Buffer, BufferUsages, FragmentState, MultisampleState,
     PipelineCompilationOptions, RenderPipeline, RenderPipelineDescriptor, VertexAttribute,
     VertexBufferLayout, VertexState,
     util::{BufferInitDescriptor, DeviceExt},
@@ -10,7 +14,9 @@ use wgpu::{
 };
 
 use crate::{
-    data::Resource, game::{Data, SpanInit, SpanMask}, gpu::{Color, GPU}
+    data::{Compartment, Data, Element, Resource},
+    game::GameComponent,
+    gpu::{Color, GPU},
 };
 
 pub type MeshHandle2D = Arc<Mesh2D>;
@@ -44,6 +50,7 @@ pub struct Instance2D {
     pub color: Color,
 }
 impl Instance2D {
+    const SIZE: u64 = std::mem::size_of::<Self>() as u64;
     const ATTRIBUTES: &'static [VertexAttribute] = &wgpu::vertex_attr_array![
         // Transform (Mat2)
         3 => Float32x2,
@@ -54,7 +61,7 @@ impl Instance2D {
         6 => Float32x4,
     ];
     const LAYOUT: VertexBufferLayout<'static> = VertexBufferLayout {
-        array_stride: std::mem::size_of::<Self>() as u64,
+        array_stride: Self::SIZE,
         step_mode: wgpu::VertexStepMode::Instance,
         attributes: Self::ATTRIBUTES,
     };
@@ -90,31 +97,21 @@ impl Mesh2D {
 }
 
 pub struct Visuals2D {
-    pub spans: Vec<usize>,
-    instance_buffer: wgpu::Buffer,
+    keys: FxHashSet<Key>,
+    instance_buffers: Vec<wgpu::Buffer>,
     camera_buffer: wgpu::Buffer,
     camera: wgpu::BindGroup,
 }
 impl Visuals2D {
-    pub const MASK: SpanMask = SpanMask {
-        mesh: true,
-        visual_2d: true,
-        ..SpanMask::NONE
-    };
-    pub fn new(spans: Vec<usize>, len: usize) -> Self {
+    pub fn new() -> Self {
         let camera_buffer = GPU.device.create_buffer_init(&BufferInitDescriptor {
             label: Some("camera"),
             contents: bytemuck::cast_slice(&glam::Affine2::IDENTITY.to_cols_array()),
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         });
         Self {
-            spans,
-            instance_buffer: GPU.device.create_buffer(&BufferDescriptor {
-                label: Some("visuals 2d instance"),
-                size: len as u64 * Instance2D::LAYOUT.array_stride,
-                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }),
+            keys: Default::default(),
+            instance_buffers: Default::default(),
             camera: GPU.device.create_bind_group(&BindGroupDescriptor {
                 label: Some("camera"),
                 layout: &CAMERA_LAYOUT,
@@ -126,31 +123,67 @@ impl Visuals2D {
             camera_buffer,
         }
     }
-    pub fn init(span: SpanInit, mesh: Arc<Mesh2D>) {
-        for m in span.mesh.unwrap() {
-            m.write(mesh.clone());
-        }
+    pub fn add(&mut self, element: &mut Element, key: Key) {
+        self.keys.insert(key);
+        *element.get_mut(GameComponent::InstanceBuffer) =
+            Compartment::One(Box::new(GPU.device.create_buffer(&BufferDescriptor {
+                label: Some("visuals 2d instance"),
+                size: element.len() as u64 * Instance2D::SIZE,
+                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })));
     }
-    pub fn render<'a>(&self, data: &Data, pass: &mut wgpu::RenderPass<'a>) {
-        GPU.queue.write_buffer(
-            &self.instance_buffer,
-            0,
-            bytemuck::cast_slice(unsafe {
-                std::mem::transmute::<&[std::mem::MaybeUninit<Instance2D>], &[Instance2D]>(
-                    &data.visual_2d.elements,
-                )
-            }),
-        );
-        pass.set_pipeline(&PIPELINE);
-        pass.set_bind_group(0, &self.camera, &[]);
-        pass.set_vertex_buffer(1, self.instance_buffer.slice(..)); // Instance buffer
-        for span in self.spans.iter().copied() {
-            let mut buffer_position = data.visual_2d.positions[span] as u32;
-            let span = data.get_span(span);
-            for mesh in span.mesh.unwrap().iter() {
-                mesh.set(pass);
-                pass.draw_indexed(0..mesh.indices, 0, buffer_position..buffer_position + 1);
-                buffer_position += 1;
+    pub fn render<'a>(&self, data: &mut Data, pass: &mut wgpu::RenderPass<'a>) {
+        for key in self.keys.iter().copied() {
+            let Some(element) = data.get_mut(key) else {
+                continue;
+            };
+            let Ok(compartments) = element.get_mut_disjoint([
+                GameComponent::InstanceBuffer as usize,
+                GameComponent::Transform as usize,
+                GameComponent::Color as usize,
+            ]) else {
+                continue;
+            };
+            let Some(buffer) = compartments[0].cast_one_mut::<Buffer>() else {
+                continue;
+            };
+            let Some(transform) = compartments[1].as_slice::<Affine2>() else {
+                continue;
+            };
+            let Some(color) = compartments[2].as_slice::<Color>() else {
+                continue;
+            };
+
+            let buffer_len = (buffer.size() / Instance2D::SIZE) as usize;
+            let element_len = element.len();
+            if buffer_len < element_len {
+                self.add(element, key);
+            }
+            let Some(buffer_size) = NonZero::new(buffer.size()) else {
+                continue;
+            };
+            let Some(view) = GPU.queue.write_buffer_with(buffer, 0, buffer_size) else {
+                continue;
+            };
+            let view = bytemuck::cast_slice_mut::<_, Instance2D>(&mut view);
+            for i in 0..element_len {
+                view[i] = Instance2D {
+                    transform: transform[i].to_cols_array(),
+                    color: color[i],
+                };
+            }
+            pass.set_pipeline(&PIPELINE);
+            pass.set_bind_group(0, &self.camera, &[]);
+            pass.set_vertex_buffer(1, self.instance_buffer.slice(..)); // Instance buffer
+            for span in self.spans.iter().copied() {
+                let mut buffer_position = data.visual_2d.positions[span] as u32;
+                let span = data.get_span(span);
+                for mesh in span.mesh.unwrap().iter() {
+                    mesh.set(pass);
+                    pass.draw_indexed(0..mesh.indices, 0, buffer_position..buffer_position + 1);
+                    buffer_position += 1;
+                }
             }
         }
     }

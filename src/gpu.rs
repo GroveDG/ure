@@ -7,10 +7,13 @@ use wgpu::{
 };
 use winit::dpi::PhysicalSize;
 
-use crate::app::{SpanInit, SpanMask, Window, init_windows};
+use crate::app::Window;
 
+pub mod bind;
+pub mod instancing;
 #[cfg(feature = "2d")]
 pub mod two;
+pub mod vertex;
 
 pub type Surface = wgpu::Surface<'static>;
 
@@ -21,11 +24,8 @@ pub static GPU: std::sync::LazyLock<Gpu> =
 
 pub type Color = color::AlphaColor<Srgb>;
 
-pub fn init_surfaces<'a>(
-    windows: &[Window],
-    surfaces: &'a mut [MaybeUninit<Surface>],
-) -> &'a mut [Surface] {
-    for i in 0..windows.len() {
+pub fn init_surfaces(windows: &[Window], surfaces: &mut [MaybeUninit<Surface>]) {
+    for i in 0..surfaces.len() {
         let window = windows[i].clone();
         let size = window.inner_size();
         let surface = GPU.instance.create_surface(window).unwrap();
@@ -37,37 +37,19 @@ pub fn init_surfaces<'a>(
         );
         surfaces[i].write(surface);
     }
-    unsafe { std::mem::transmute(surfaces) }
 }
-pub fn init_window_sizes<'a>(
+pub fn init_surface_sizes(
     windows: &[Window],
-    sizes: &'a mut [MaybeUninit<PhysicalSize<u32>>],
-) -> &'a mut [PhysicalSize<u32>] {
-    for i in 0..windows.len() {
+    sizes: &mut [MaybeUninit<PhysicalSize<u32>>],
+) {
+    for i in 0..sizes.len() {
         sizes[i].write(windows[i].inner_size());
     }
-    unsafe { std::mem::transmute(sizes) }
 }
-
-pub fn init_windows_and_surfaces(
-    span: &mut SpanInit,
-    event_loop: &winit::event_loop::ActiveEventLoop,
-) {
-    let window = init_windows(span.window.take().unwrap(), event_loop);
-    init_surfaces(window, span.surface.take().unwrap());
-    init_window_sizes(window, span.window_size.take().unwrap());
-}
-
-pub const MASK: SpanMask = SpanMask {
-    window: true,
-    surface: true,
-    window_size: true,
-    ..SpanMask::NONE
-};
 
 pub fn reconfigure_surfaces(
-    surfaces: &[Surface],
     windows: &[Window],
+    surfaces: &[Surface],
     sizes: &mut [PhysicalSize<u32>],
 ) {
     for i in 0..surfaces.len() {
@@ -114,7 +96,7 @@ pub fn begin_passes<'a>(
                     wgpu::RenderPassColorAttachment {
                         view: &surface_textures[i].texture.create_view(
                             &wgpu::TextureViewDescriptor {
-                                format: Some(SURFACE_FORMAT),
+                                format: Some(surface_textures[i].texture.format()),
                                 ..Default::default()
                             },
                         ),

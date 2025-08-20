@@ -58,6 +58,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "any_vec"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34cd60c5e3152cef0a592f1b296f1cc93715d89d2551d85315828c3a09575ff4"
+
+[[package]]
 name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1161,6 +1167,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ordered-float"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2c1f9f56e534ac6a9b8a4600bdf0f530fb393b5f393e7b4d03489c3cf0c3f01"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1707,6 +1722,7 @@ checksum = "4a1a07cc7db3810833284e8d372ccdc6da29741639ecc70c9ec107df0fa6154c"
 name = "ure"
 version = "0.1.0"
 dependencies = [
+ "any_vec",
  "bitvec",
  "bytemuck",
  "color",
@@ -1714,6 +1730,7 @@ dependencies = [
  "futures",
  "glam",
  "nohash-hasher",
+ "ordered-float 5.0.0",
  "parking_lot",
  "rand",
  "raw-window-handle",
@@ -2066,7 +2083,7 @@ dependencies = [
  "naga",
  "ndk-sys 0.5.0+25.2.9519653",
  "objc",
- "ordered-float",
+ "ordered-float 4.6.0",
  "parking_lot",
  "portable-atomic",
  "profiling",

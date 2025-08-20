@@ -1,7 +1,16 @@
+use slotmap::new_key_type;
+use spin_sleep::sleep;
 use ure::{
-    app::{App, Input}, data::{Data, Key}, gpu::two::Visuals2D
+    app::{App, AppReceiver, Window, init_windows},
+    data, element, extend,
+    gpu::{
+        Surface, begin_passes, init_encoders, init_surface_sizes, init_surface_textures,
+        init_surfaces, present_surfaces, reconfigure_surfaces, submit_encoders,
+        two::{Mesh2DHandle, QUAD},
+    },
+    store::{Data, Element},
 };
-use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
+use winit::{dpi::PhysicalSize, event_loop::EventLoop, window::WindowAttributes};
 
 #[repr(usize)]
 #[derive(Debug, Clone, Copy)]
@@ -18,47 +27,44 @@ fn main() {
 }
 
 struct Game {
-    window_data: ure::app::Data,
-    game_data: Data,
-    windows: Key,
-    input: Input,
-    test_visuals: Key,
-    visuals_2d: ure::gpu::two::Visuals2D,
+    windows: Element,
+    data: Data<GameKey>,
+    test_visuals: GameKey,
+    receiver: AppReceiver,
 }
 
 pub enum Event {
     Exit,
 }
 
-impl ure::app::Game for Game {
-    type Event = Event;
+new_key_type! {
+    pub struct GameKey;
+}
 
-    fn new(event_loop: &ActiveEventLoop, proxy: EventLoopProxy<Self::Event>, input: Input) -> Self {
-        let mut window_data = ure::app::Data::default();
-        let windows = window_data.init_span(ure::gpu::MASK, 1, |mut span| {
-            ure::gpu::init_windows_and_surfaces(&mut span, event_loop)
+impl ure::app::Game for Game {
+    fn new(receiver: AppReceiver) -> Self {
+        let windows = extend! {
+            element!(Window, Surface, PhysicalSize<u32>),
+            1,
+            {
+                windows: Window = { init_windows([WindowAttributes::default()], windows, &receiver); },
+                surfaces: Surface = { init_surfaces(windows, surfaces) },
+                sizes: PhysicalSize<u32> = { init_surface_sizes(windows, sizes) },
+            }
+        };
+        let mut data = Data::<GameKey>::with_key();
+        let test_visuals = data.insert(extend! {
+            element!(Mesh2DHandle),
+            1,
+            {
+                meshes: Mesh2DHandle = { for i in 0..meshes.len() { meshes[i].write(QUAD.load()); } },
+            }
         });
-        window_data.get_span(windows).window.unwrap()[0].set_title("URE");
-        let mut game_data = ure::game::Data::default();
-        let test_visuals = game_data.init_span(Visuals2D::MASK, 1, |span| {
-            span.visual_2d
-                .unwrap()
-                .fill(std::mem::MaybeUninit::new(ure::gpu::two::Instance2D {
-                    transform: glam::Affine2::IDENTITY.to_cols_array(),
-                    color: ure::gpu::Color::WHITE,
-                }));
-            span.mesh
-                .unwrap()
-                .fill_with(|| std::mem::MaybeUninit::new(ure::gpu::two::QUAD.load()));
-        });
-        let visuals_2d = Visuals2D::new(vec![test_visuals], game_data.visual_2d.elements.len());
         Game {
-            window_data,
-            game_data,
             windows,
-            input,
+            data,
             test_visuals,
-            visuals_2d,
+            receiver,
         }
     }
 
@@ -68,38 +74,31 @@ impl ure::app::Game for Game {
         loop {
             frame_start = std::time::Instant::now();
             {
-                let span = self.window_data.get_mut_span(self.windows);
-                let surfaces = span.surface.unwrap();
-                ure::gpu::reconfigure_surfaces(
-                    surfaces,
-                    span.window.unwrap(),
-                    span.window_size.unwrap(),
-                );
-                let surface_textures = ure::gpu::init_surface_textures(surfaces);
-                {
-                    let mut encoders = ure::gpu::init_encoders(surfaces.len());
+                data! {
+                    self.windows,
                     {
-                        let mut passes = ure::gpu::begin_passes(
-                            &mut encoders,
-                            &surface_textures,
-                            wgpu::Color::BLACK,
-                        );
-                        for pass in passes.iter_mut() {
-                            self.visuals_2d.render(&self.game_data, pass);
-                        }
+                        windows: Window,
+                        surfaces: Surface,
+                        sizes: PhysicalSize<u32>,
+                    } else {
+                        panic!()
                     }
-                    ure::gpu::submit_encoders(encoders);
                 }
-                ure::gpu::present_surfaces(surface_textures);
+                reconfigure_surfaces(windows, surfaces, sizes);
+                let surface_textures = init_surface_textures(surfaces);
+                {
+                    let mut encoders = init_encoders(surfaces.len());
+                    {
+                        let mut passes =
+                            begin_passes(&mut encoders, &surface_textures, wgpu::Color::BLACK);
+                        for pass in passes.iter_mut() {}
+                    }
+                    submit_encoders(encoders);
+                }
+                present_surfaces(surface_textures);
             }
-            spin_sleep::sleep(FRAME_TIME.saturating_sub(frame_start.elapsed()));
+            sleep(FRAME_TIME.saturating_sub(frame_start.elapsed()));
             delta = frame_start.elapsed();
-        }
-    }
-
-    fn event(event_loop: &ActiveEventLoop, event: Self::Event) {
-        match event {
-            Event::Exit => event_loop.exit(),
         }
     }
 }

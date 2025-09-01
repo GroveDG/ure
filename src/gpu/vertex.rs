@@ -6,9 +6,12 @@ pub trait VertexBuffer {
 }
 
 pub trait Vertex {}
-pub trait Instance {}
+pub trait Instance: bytemuck::Pod {}
 
-pub fn relocate_attributes(attrs: &'static [VertexAttribute], location: u32) -> Box<[VertexAttribute]> {
+pub fn relocate_attributes(
+    attrs: &'static [VertexAttribute],
+    location: u32,
+) -> Box<[VertexAttribute]> {
     let mut boxed = attrs.to_owned().into_boxed_slice();
     for i in 0..attrs.len() {
         boxed[i].shader_location += location;
@@ -44,8 +47,9 @@ macro_rules! vertex_buffers {
         use $crate::gpu::vertex::VertexBuffer;
         let mut location: u32 = 0;
         $(
-                location += <$t>::ATTRIBUTES.len() as u32;
         let $i = $crate::gpu::vertex::relocate_attributes(<$t>::ATTRIBUTES, location);
+        #[allow(unused_assignments)]
+        { location += <$t>::ATTRIBUTES.len() as u32; }
         )+
         let $name = [$(
             wgpu::VertexBufferLayout {

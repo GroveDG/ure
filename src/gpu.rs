@@ -1,9 +1,9 @@
-use std::mem::MaybeUninit;
+use std::{mem::MaybeUninit, sync::OnceLock};
 
 use color::Srgb;
 use wgpu::{
     Adapter, CommandEncoder, Device, DeviceDescriptor, Instance, InstanceDescriptor, Queue,
-    RenderPassDescriptor, RequestAdapterOptions, SurfaceTexture,
+    RenderPassDescriptor, RequestAdapterOptions, SurfaceTexture, TextureFormat,
 };
 use winit::dpi::PhysicalSize;
 
@@ -11,16 +11,16 @@ use crate::app::Window;
 
 pub mod bind;
 pub mod instancing;
+pub mod rendering;
 #[cfg(feature = "2d")]
 pub mod two;
 pub mod vertex;
 
 pub type Surface = wgpu::Surface<'static>;
 
-const SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
-
 pub static GPU: std::sync::LazyLock<Gpu> =
     std::sync::LazyLock::new(|| futures::executor::block_on(Gpu::new()));
+pub static SURFACE_FORMAT: OnceLock<TextureFormat> = OnceLock::new();
 
 pub type Color = color::AlphaColor<Srgb>;
 
@@ -29,19 +29,18 @@ pub fn init_surfaces(windows: &[Window], surfaces: &mut [MaybeUninit<Surface>]) 
         let window = windows[i].clone();
         let size = window.inner_size();
         let surface = GPU.instance.create_surface(window).unwrap();
-        surface.configure(
-            &GPU.device,
-            &surface
-                .get_default_config(&GPU.adapter, size.width, size.height)
-                .unwrap(),
-        );
+        let config = &surface
+            .get_default_config(&GPU.adapter, size.width, size.height)
+            .unwrap();
+        // Assert that all surfaces have the same texture format.
+        // This simplifies everything greatly at the cost of some
+        // obscure situations which are not supported.
+        assert_eq!(config.format, *SURFACE_FORMAT.get_or_init(|| config.format));
+        surface.configure(&GPU.device, config);
         surfaces[i].write(surface);
     }
 }
-pub fn init_surface_sizes(
-    windows: &[Window],
-    sizes: &mut [MaybeUninit<PhysicalSize<u32>>],
-) {
+pub fn init_surface_sizes(windows: &[Window], sizes: &mut [MaybeUninit<PhysicalSize<u32>>]) {
     for i in 0..sizes.len() {
         sizes[i].write(windows[i].inner_size());
     }
@@ -56,12 +55,10 @@ pub fn reconfigure_surfaces(
         let size = windows[i].inner_size();
         if size != sizes[i] {
             sizes[i] = size;
-            surfaces[i].configure(
-                &GPU.device,
-                &surfaces[i]
-                    .get_default_config(&GPU.adapter, size.width, size.height)
-                    .unwrap(),
-            );
+            let config = &surfaces[i]
+                .get_default_config(&GPU.adapter, size.width, size.height)
+                .unwrap();
+            surfaces[i].configure(&GPU.device, config);
         }
     }
 }

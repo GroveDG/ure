@@ -35,56 +35,54 @@ pub type Data<K> = SlotMap<K, Element>;
 
 #[macro_export]
 macro_rules! element {
-    ( $($t:ty),* $(,)? ) => {
-        $crate::store::Element::new(
-            rustc_hash::FxHashMap::default(),
-            rustc_hash::FxHashMap::from_iter([
-                $(
-                (std::any::TypeId::of::<$t>(), $crate::store::Compartment::Many(any_vec::AnyVec::new::<$t>())),
-                )*
-            ])
-        )
+    (
+        $amount_i:ident : $amount:expr,
+        {
+            $($ft:ty : $f:expr),* $(,)?
+        }
+        {
+            $($i:ident : $(one $ot:ty $o_extend:block)? $(many $mt:ty $m_extend:block)?),+ $(,)?
+        }
+    ) => {
+        {
+            let $amount_i = $amount;
+            let mut element = $crate::store::Element::new(
+                rustc_hash::FxHashMap::from_iter([$(
+                    (std::any::TypeId::of::<$ft>(), $f)
+                ),*]),
+                rustc_hash::FxHashMap::from_iter([$(
+                    $((std::any::TypeId::of::<$ot>(), $crate::store::Compartment::One(Box::new(<$ot>::new()))))?
+                    $((std::any::TypeId::of::<$mt>(), $crate::store::Compartment::Many(any_vec::AnyVec::new::<$mt>())))?
+                ),+])
+            );
+            $crate::extend! {
+                element,
+                $amount_i : $amount_i,
+                {
+                    $($i : $($ot | one $o_extend)? $($mt | many $m_extend)?),+
+                }
+            }
+        }
     };
 }
 
-// #[macro_export]
-// macro_rules! element {
-//     ( { $($f:ty : $func:expr),* $(,)? } { $($t:ty : $component:expr),* $(,)? } ) => {
-//         {
-//             let mut len: Option<usize> = None;
-//             $crate::store::Element::new (
-//                 FxHashMap::from_iter([
-//                     $(
-//                     (std::any::TypeId::of::<$f>(), $func),
-//                     )*
-//                 ]),
-//                 FxHashMap::from_iter([
-//                     $({
-//                     let component: Box<dyn std::any::Any> = Box::new($component);
-//                     let component = if component.is::<$t>() {
-//                         Component::One(component)
-//                     } else {
-//                         Component::Many(any_vec::AnyVec::from(component))
-//                     };
-//                     (std::any::TypeId::of::<$t>(), component)
-//                     },)*
-//                 ])
-//             )
-//         }
-//     };
-// }
-
 #[macro_export]
 macro_rules! extend {
-    ( $element:expr, $amount:expr, { $($component:ident : $t:ty = $init:block),+ $(,)? } ) => {
+    (
+        $element:expr,
+        $amount_i:ident : $amount:expr,
+        {
+            $($i:ident : $t:ty | $(one $o_extend:block)? $(many $m_extend:block)?),+ $(,)?
+        }
+    ) => {
         {
             let mut element = $element;
             let len = element.len().unwrap();
-            let amount = $amount;
+            let $amount_i = $amount;
             let components = [
                 $(&std::any::TypeId::of::<$t>(),)+
             ];
-            
+
             // Assert that we have all the components
             assert_eq!(components.len(), element.bredth());
 
@@ -100,21 +98,32 @@ macro_rules! extend {
 
                 #[allow(unused_variables)]
                 {$(
-                let $component = unsafe { components.next().unwrap_unchecked().as_mut().unwrap_unchecked() };
-                let $component: &mut [$t] = match $component {
+                let $i = unsafe { components.next().unwrap_unchecked().as_mut().unwrap_unchecked() };
+
+                $(
+                let $i: &mut $t = match $i {
                     $crate::store::Compartment::One(one) => {
-                        one.as_mut().downcast_mut::<$t>().map(std::slice::from_mut).unwrap()
+                        let $i = &mut one.as_mut().downcast_mut::<$t>().map(std::slice::from_mut).unwrap()[0];
+                        $o_extend
+                        $i
                     },
+                    _ => panic!(),
+                }
+                )?
+                $(
+                let $i: &mut [$t] =match $i {
                     $crate::store::Compartment::Many(many) => {
-                        many.reserve(amount);
-                        let $component: &mut [std::mem::MaybeUninit<$t>] = unsafe {
+                        many.reserve($amount_i);
+                        let $i: &mut [std::mem::MaybeUninit<$t>] = unsafe {
                             std::mem::transmute(many.spare_bytes_mut())
                         };
-                        let $component = &mut $component[..amount];
-                        $init
-                        unsafe { std::mem::transmute($component) }
+                        let $i = &mut $i[..$amount_i];
+                        $m_extend
+                        unsafe { std::mem::transmute($i) }
                     },
-                };
+                    _ => panic!(),
+                }
+                )?;
                 )+}
             }
 
@@ -122,9 +131,9 @@ macro_rules! extend {
                 let $crate::store::Compartment::Many(many) = component.unwrap_unchecked() else {
                     continue;
                 };
-                many.set_len(len + amount);
+                many.set_len(len + $amount_i);
             }}
-            unsafe { element.set_len(len + amount); }
+            unsafe { element.set_len(len + $amount_i); }
             element
         }
     };
@@ -187,7 +196,7 @@ impl Element {
     }
     pub unsafe fn set_len(&mut self, len: usize) {
         self.len = Some(len);
-    } 
+    }
     #[inline]
     pub fn bredth(&self) -> usize {
         self.components.len()
@@ -237,13 +246,7 @@ impl Element {
             let Some(Compartment::Many(mut o)) = other.components.remove(ty) else {
                 continue;
             };
-            v.reserve(o.len());
-            for value in o.drain(..) {
-                // SAFETY: We already checked types since TypeIds are keys.
-                unsafe {
-                    v.push_unchecked(value);
-                }
-            }
+            v.append(&mut o);
         }
     }
 }

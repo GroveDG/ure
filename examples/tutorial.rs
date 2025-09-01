@@ -1,12 +1,11 @@
+use glam::Affine2;
 use slotmap::new_key_type;
 use spin_sleep::sleep;
 use ure::{
-    app::{App, AppReceiver, Window, init_windows},
-    data, element, extend,
+    app::{init_windows, App, AppReceiver, Window},
+    data, element,
     gpu::{
-        Surface, begin_passes, init_encoders, init_surface_sizes, init_surface_textures,
-        init_surfaces, present_surfaces, reconfigure_surfaces, submit_encoders,
-        two::{Mesh2DHandle, QUAD},
+        begin_passes, init_encoders, init_surface_sizes, init_surface_textures, init_surfaces, instancing::InstanceBuffer, present_surfaces, reconfigure_surfaces, rendering::Rendering, submit_encoders, two::{Instance2D, Mesh2DHandle, Visuals2D, DEFAULT_2D, QUAD}, Color, Surface
     },
     store::{Data, Element},
 };
@@ -30,11 +29,8 @@ struct Game {
     windows: Element,
     data: Data<GameKey>,
     test_visuals: GameKey,
+    visuals_2d: Visuals2D<GameKey>,
     receiver: AppReceiver,
-}
-
-pub enum Event {
-    Exit,
 }
 
 new_key_type! {
@@ -43,27 +39,50 @@ new_key_type! {
 
 impl ure::app::Game for Game {
     fn new(receiver: AppReceiver) -> Self {
-        let windows = extend! {
-            element!(Window, Surface, PhysicalSize<u32>),
-            1,
+        let windows = element! {
+            len: 1,
             {
-                windows: Window = { init_windows([WindowAttributes::default()], windows, &receiver); },
-                surfaces: Surface = { init_surfaces(windows, surfaces) },
-                sizes: PhysicalSize<u32> = { init_surface_sizes(windows, sizes) },
+
+            }
+            {
+                windows: many Window { init_windows([WindowAttributes::default()], windows, &receiver); },
+                surfaces: many Surface { init_surfaces(windows, surfaces) },
+                sizes: many PhysicalSize<u32> { init_surface_sizes(windows, sizes) },
             }
         };
         let mut data = Data::<GameKey>::with_key();
-        let test_visuals = data.insert(extend! {
-            element!(Mesh2DHandle),
-            1,
+        let test_visuals = data.insert(element! {
+            len: 1,
             {
-                meshes: Mesh2DHandle = { for i in 0..meshes.len() { meshes[i].write(QUAD.load()); } },
+                Rendering: DEFAULT_2D,
+            }
+            {
+                transforms: many Affine2 { for i in 0..len { transforms[i].write(Default::default()); } },
+                color: many Color { for i in 0..len { color[i].write(Color::WHITE); } },
+                instances: one InstanceBuffer<Instance2D> { instances.extend(len, |instances| {
+                    for i in 0..len {
+                        let transform = transforms[i];
+                        let matrix = transform.matrix2;
+                        let translation = transform.translation;
+                        let color = color[i];
+                        instances[i].write(Instance2D {
+                            col_0: matrix.x_axis,
+                            col_1: matrix.y_axis,
+                            position: translation,
+                            color: color
+                        });
+                    }
+                }) },
+                meshes: many Mesh2DHandle { for i in 0..len { meshes[i].write(QUAD.load()); } },
             }
         });
+        let mut visuals_2d = Visuals2D::new();
+        visuals_2d.add(test_visuals);
         Game {
             windows,
             data,
             test_visuals,
+            visuals_2d,
             receiver,
         }
     }
@@ -91,7 +110,9 @@ impl ure::app::Game for Game {
                     {
                         let mut passes =
                             begin_passes(&mut encoders, &surface_textures, wgpu::Color::BLACK);
-                        for pass in passes.iter_mut() {}
+                        for pass in passes.iter_mut() {
+                            self.visuals_2d.render(&self.data, pass);
+                        }
                     }
                     submit_encoders(encoders);
                 }

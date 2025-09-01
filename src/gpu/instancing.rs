@@ -1,26 +1,75 @@
-use std::{fmt::Debug, marker::PhantomData, num::NonZero};
+use std::{fmt::Debug, marker::PhantomData, mem::MaybeUninit};
 
-use glam::Affine2;
-use wgpu::{Buffer, BufferDescriptor, BufferUsages};
+use wgpu::{Buffer, BufferDescriptor, BufferSlice, BufferUsages};
 
 use crate::{
-    data,
-    gpu::{Color, GPU, two::Instance2D, vertex::Instance},
+    gpu::{GPU, vertex::Instance},
     store::Element,
 };
 
-#[repr(transparent)]
 #[derive(Debug, Clone)]
 pub struct InstanceBuffer<I: Instance> {
-    pub inner: Buffer,
+    length: usize,
+    capacity: usize,
+    buffer: Buffer,
     _marker: PhantomData<I>,
 }
 impl<I: Instance> InstanceBuffer<I> {
-    pub fn new(buffer: Buffer) -> Self {
+    pub fn new() -> Self {
         Self {
-            inner: buffer,
+            length: 0,
+            capacity: 0,
+            buffer: GPU.device.create_buffer(&BufferDescriptor {
+                label: Some("visuals 2d instance"),
+                size: (0 * std::mem::size_of::<I>()) as u64,
+                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
             _marker: Default::default(),
         }
+    }
+    pub fn extend(&mut self, add: usize, init: impl FnOnce(&mut [MaybeUninit<I>])) {
+        let length = self.length + add;
+        if self.capacity < length {
+            let capacity: usize = length.next_power_of_two();
+            let buffer = GPU.device.create_buffer(&BufferDescriptor {
+                label: Some("visuals 2d instance"),
+                size: (capacity * std::mem::size_of::<I>()) as u64,
+                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                mapped_at_creation: true,
+            });
+
+            {
+                let mut new = buffer.get_mapped_range_mut(..);
+                let new_slice: &mut [I] = bytemuck::cast_slice_mut(&mut new);
+
+                if self.length > 0 {
+                    let mut current = self.buffer.get_mapped_range_mut(..);
+                    let current_slice: &mut [I] = bytemuck::cast_slice_mut(&mut current);
+                    new_slice[0..self.length].copy_from_slice(&current_slice[0..self.length]);
+                }
+
+                (init)(unsafe { std::mem::transmute(&mut new_slice[self.length..length]) });
+            }
+
+            self.buffer = buffer;
+            self.capacity = capacity;
+        } else {
+            let mut view = self
+                .buffer
+                .get_mapped_range_mut((self.length as u64)..(length as u64));
+            let slice: &mut [I] = bytemuck::cast_slice_mut(&mut view);
+
+            (init)(unsafe { std::mem::transmute(slice) });
+        }
+        self.buffer.unmap();
+        self.length = length;
+    }
+    pub fn len(&self) -> usize {
+        self.length
+    }
+    pub fn slice<'a>(&'a self) -> BufferSlice<'a> {
+        self.buffer.slice(0..(self.length * std::mem::size_of::<I>()) as u64)
     }
 }
 
@@ -36,14 +85,6 @@ impl<I: Instance> Instancing<I> {
             instance: f,
             _marker: Default::default(),
         }
-    }
-    pub fn new_buffer(len: usize) -> InstanceBuffer<I> {
-        InstanceBuffer::new(GPU.device.create_buffer(&BufferDescriptor {
-            label: Some("visuals 2d instance"),
-            size: (len * std::mem::size_of::<I>()) as u64,
-            usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }))
     }
 }
 

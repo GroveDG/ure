@@ -1,23 +1,29 @@
-use std::sync::{Arc, LazyLock};
+use std::{
+    any::Any,
+    sync::{Arc, LazyLock},
+};
 
 use glam::Vec2;
 use rustc_hash::FxHashSet;
 use slotmap::Key;
 use wgpu::{
     BindGroupDescriptor, BindGroupLayout, BufferUsages, FragmentState, MultisampleState,
-    PipelineCompilationOptions, RenderPipeline, RenderPipelineDescriptor, VertexState,
+    PipelineCompilationOptions, PipelineLayout, RenderPass, RenderPipeline,
+    RenderPipelineDescriptor, ShaderModule, VertexState,
     util::{BufferInitDescriptor, DeviceExt},
 };
 
 use crate::{
-    gpu::{two::rendering::SortItem, Color, GPU},
-    store::{Compartment, Element, Resource}, vertex, vertex_buffers,
+    gpu::{
+        Color, GPU, SURFACE_FORMAT,
+        instancing::InstanceBuffer,
+        rendering::{RenderLayer, Rendering},
+    },
+    store::{Data, Resource},
+    vertex, vertex_buffers,
 };
 
 pub type Mesh2DHandle = Arc<Mesh2D>;
-
-pub mod instancing;
-pub mod rendering;
 
 vertex! {
     Vertex Vertex2D
@@ -27,8 +33,8 @@ vertex! {
 }
 vertex! {
     Instance Instance2D
-    0 row_0: Vec2 | Float32x2,
-    1 row_1: Vec2 | Float32x2,
+    0 col_0: Vec2 | Float32x2,
+    1 col_1: Vec2 | Float32x2,
     2 position: Vec2 | Float32x2,
     3 color: Color | Float32x4,
 }
@@ -62,53 +68,91 @@ impl Mesh2D {
     }
 }
 
-// pub struct Visuals2D<K: Key> {
-//     keys: FxHashSet<K>,
-//     instance_buffers: Vec<wgpu::Buffer>,
-//     camera_buffer: wgpu::Buffer,
-//     camera: wgpu::BindGroup,
-//     order: Vec<Vec<SortItem>>,
-// }
-// impl<K: Key> Visuals2D<K> {
-//     pub fn new() -> Self {
-//         let camera_buffer = GPU.device.create_buffer_init(&BufferInitDescriptor {
-//             label: Some("camera"),
-//             contents: bytemuck::cast_slice(&glam::Affine2::IDENTITY.to_cols_array()),
-//             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-//         });
-//         Self {
-//             keys: Default::default(),
-//             instance_buffers: Default::default(),
-//             camera: GPU.device.create_bind_group(&BindGroupDescriptor {
-//                 label: Some("camera"),
-//                 layout: &CAMERA_LAYOUT,
-//                 entries: &[wgpu::BindGroupEntry {
-//                     binding: 0,
-//                     resource: camera_buffer.as_entire_binding(),
-//                 }],
-//             }),
-//             camera_buffer,
-//             order: Default::default(),
-//         }
-//     }
-//     pub fn add(&mut self, element: &mut Element, key: K) {
-//         self.keys.insert(key);
-//         let len = (element.get_static::<Instancing>().unwrap().len)(
-//             element.get().unwrap(),
-//             element.get().unwrap(),
-//         );
-//         element.insert::<InstanceBuffer>(Compartment::One(Box::new(InstanceBuffer(
-//             Self::new_buffer(len),
-//         ))));
-//     }
-//     pub fn set_camera(&mut self, transform: &glam::Affine2) {
-//         GPU.queue.write_buffer(
-//             &self.camera_buffer,
-//             0,
-//             bytemuck::cast_slice(&transform.to_cols_array()),
-//         );
-//     }
-// }
+pub struct Visuals2D<K: Key> {
+    keys: FxHashSet<K>,
+    camera_buffer: wgpu::Buffer,
+    camera: wgpu::BindGroup,
+}
+impl<K: Key> Visuals2D<K> {
+    pub fn new() -> Self {
+        let camera_buffer = GPU.device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("camera"),
+            contents: bytemuck::cast_slice(&glam::Affine2::IDENTITY.to_cols_array()),
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        });
+        Self {
+            keys: Default::default(),
+            camera: GPU.device.create_bind_group(&BindGroupDescriptor {
+                label: Some("camera"),
+                layout: &CAMERA_LAYOUT,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                }],
+            }),
+            camera_buffer,
+        }
+    }
+    pub fn add(&mut self, key: K) {
+        self.keys.insert(key);
+    }
+    pub fn render(&self, data: &Data<K>, pass: &mut RenderPass) {
+        let mut elements = Vec::with_capacity(self.keys.len());
+        pass.set_bind_group(0, &self.camera, &[]);
+        for key in self.keys.iter().copied() {
+            let Some(element) = data.get(key) else {
+                continue;
+            };
+            let Some(rendering) = element.get_func::<Rendering>() else {
+                continue;
+            };
+            let layers = (rendering.layer)(element);
+            for layer in layers {
+                elements.push((layer, rendering, element));
+            }
+        }
+
+        elements.sort_by_key(|e| e.0);
+
+        for (layer, rendering, element) in elements {
+            (rendering.render)(element, *layer, pass);
+        }
+    }
+    pub fn set_camera(&mut self, transform: &glam::Affine2) {
+        GPU.queue.write_buffer(
+            &self.camera_buffer,
+            0,
+            bytemuck::cast_slice(&transform.to_cols_array()),
+        );
+    }
+}
+
+pub const DEFAULT_2D: &'static dyn Any = &Rendering {
+    layer: |element| {
+        let Some(layers) = element.get::<RenderLayer>() else {
+            return &[RenderLayer(0)];
+        };
+        layers
+    },
+    render: |element, layer, pass| {
+        let Some(instances) = element.get::<InstanceBuffer<Instance2D>>() else {
+            return;
+        };
+        let Some(mesh) = element.get::<Mesh2DHandle>() else {
+            return;
+        };
+
+        pass.set_pipeline(&PIPELINE);
+
+        let instances = &instances[0];
+        let mesh = &mesh[0];
+        pass.set_vertex_buffer(0, mesh.vertex.slice(..));
+        pass.set_index_buffer(mesh.index.slice(..), wgpu::IndexFormat::Uint16);
+        pass.set_vertex_buffer(1, instances.slice());
+
+        pass.draw_indexed(0..mesh.indices, 0, 0..instances.len() as u32);
+    },
+};
 
 pub static CAMERA_LAYOUT: LazyLock<BindGroupLayout> = LazyLock::new(|| {
     GPU.device
@@ -127,20 +171,22 @@ pub static CAMERA_LAYOUT: LazyLock<BindGroupLayout> = LazyLock::new(|| {
         })
 });
 
-pub static PIPELINE: LazyLock<RenderPipeline> = LazyLock::new(|| {
-    let shader = GPU
-        .device
-        .create_shader_module(wgpu::include_wgsl!("2d.wgsl"));
-
-    let layout = GPU
-        .device
+pub static PIPELINE_LAYOUT: LazyLock<PipelineLayout> = LazyLock::new(|| {
+    GPU.device
         .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
             bind_group_layouts: &[&CAMERA_LAYOUT],
             push_constant_ranges: &[],
-        });
+        })
+});
 
-    vertex_buffers!{
+pub static SHADER: LazyLock<ShaderModule> = LazyLock::new(|| {
+    GPU.device
+        .create_shader_module(wgpu::include_wgsl!("2d.wgsl"))
+});
+
+pub static PIPELINE: LazyLock<RenderPipeline> = LazyLock::new(|| {
+    vertex_buffers! {
         buffers
         vertex: Vertex2D,
         instance: Instance2D
@@ -149,19 +195,19 @@ pub static PIPELINE: LazyLock<RenderPipeline> = LazyLock::new(|| {
     GPU.device
         .create_render_pipeline(&RenderPipelineDescriptor {
             label: None,
-            layout: Some(&layout),
+            layout: Some(&PIPELINE_LAYOUT),
             vertex: VertexState {
-                module: &shader,
+                module: &SHADER,
                 entry_point: Some("vertex"),
                 compilation_options: PipelineCompilationOptions::default(),
                 buffers: &buffers,
             },
             fragment: Some(FragmentState {
-                module: &shader,
+                module: &SHADER,
                 entry_point: Some("fragment"),
                 compilation_options: PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: super::SURFACE_FORMAT,
+                    format: *SURFACE_FORMAT.get().unwrap(),
                     blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],

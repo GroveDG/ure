@@ -8,6 +8,7 @@ any_vec = { git = "https://github.com/tower120/any_vec.git", branch = "append" }
 bitvec = "1"
 bytemuck = "1"
 color = { version = "0", features = ["bytemuck"] }
+facet = "0.28.1"
 fontdue = "0"
 futures = { version = "0", default-features = false, features = ["executor"] }
 glam = { version = "0", features = ["bytemuck"] }
@@ -17,7 +18,7 @@ parking_lot = "0"
 paste = "1.0.15"
 rand = "0"
 raw-window-handle = "0"
-rustc-hash = "2"
+rustc-hash = { version = "2", features = ["nightly"] }
 slotmap = "1"
 spin_sleep = "1"
 wgpu = "25"

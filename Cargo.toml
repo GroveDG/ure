@@ -4,15 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-any_vec = { git = "https://github.com/tower120/any_vec.git", branch = "append" }
-bitvec = "1"
 bytemuck = "1"
 color = { version = "0", features = ["bytemuck"] }
 facet = "0.28.1"
 fontdue = "0"
-futures = { version = "0", default-features = false, features = ["executor"] }
 glam = { version = "0", features = ["bytemuck"] }
-nohash-hasher = "0"
 ordered-float = "5"
 parking_lot = "0"
 paste = "1.0.15"
@@ -21,8 +17,10 @@ raw-window-handle = "0"
 rustc-hash = { version = "2", features = ["nightly"] }
 slotmap = "1"
 spin_sleep = "1"
-wgpu = "25"
 winit = { version = "0", default-features = false, features = ["ahash", "bytemuck", "memmap2", "percent-encoding", "rwh_06", "wayland", "wayland-backend", "wayland-client", "wayland-dlopen", "wayland-protocols", "wayland-protocols-plasma",] }
+ure-data = { path = "ure/data" }
+ure-gpu = { path = "ure/gpu" }
+
 
 [features]
 default = ["2d", "gui"]

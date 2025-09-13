@@ -7,6 +7,7 @@ use std::{
     },
 };
 
+use ure_data::Group;
 use winit::{
     application::ApplicationHandler,
     event_loop::{ActiveEventLoop, EventLoopProxy},
@@ -23,6 +24,14 @@ pub type Window = Arc<winit::window::Window>;
 pub enum Event {
     NewWindow(WindowAttributes),
     Exit,
+}
+
+pub fn new_windows() -> Group {
+    let group = Group::default();
+
+    group;
+
+    group
 }
 
 pub trait Game: 'static {

@@ -9,11 +9,17 @@ use std::{
 use bimap::BiHashMap;
 use bitvec::vec::BitVec;
 
-use crate::Func;
-
 pub trait DataAny: Any {
     fn inner_type(&self) -> TypeId;
     fn reserve(&mut self, additional: usize);
+}
+impl dyn DataAny {
+    pub fn is<D: DataGeneric<T>, T: Any>(&self) -> bool {
+        (self as &dyn Any).is::<D>()
+    }
+    pub fn inner_is<T: Any>(&self) -> bool {
+        self.inner_type() == TypeId::of::<T>()
+    }
 }
 
 type TypedVtable = NonNull<()>;
@@ -22,6 +28,20 @@ pub struct DataBox {
     any: Box<dyn DataAny>,
     typed: TypedVtable,
 }
+impl<'a, T: Any> TryFrom<&'a DataBox> for &'a dyn DataGeneric<T> {
+    type Error = ();
+
+    fn try_from(value: &'a DataBox) -> Result<Self, Self::Error> {
+        if value.inner_type() != TypeId::of::<T>() {
+            return Err(());
+        }
+        let ptr = value.any.as_ref() as *const dyn DataAny;
+        let typed: *const dyn DataGeneric<T> =
+            unsafe { std::ptr::from_raw_parts(ptr as *const (), std::mem::transmute(value.typed)) };
+        unsafe { typed.as_ref().ok_or(()) }
+    }
+}
+
 impl DataBox {
     pub fn cast_ref<'a, T: 'static>(&'a self) -> Option<&'a dyn DataGeneric<T>> {
         if self.inner_type() != TypeId::of::<T>() {
@@ -42,13 +62,15 @@ impl DataBox {
         };
         unsafe { typed.as_mut() }
     }
-    pub fn downcast_ref<'a, T: 'static, C: DataTyped<T>>(&'a self) -> Option<C::View<'a>> {
+    pub fn downcast_ref<'a, D: DataSpecific<Inner = T>, T: Any>(&'a self) -> Option<D::View<'a>> {
         let any: &dyn Any = self.any.as_ref();
-        Some(any.downcast_ref::<C>()?.view())
+        Some(any.downcast_ref::<D>()?.view())
     }
-    pub fn downcast_mut<'a, T: 'static, C: DataTyped<T>>(&'a mut self) -> Option<C::ViewMut<'a>> {
+    pub fn downcast_mut<'a, D: DataSpecific<Inner = T>, T: Any>(
+        &'a mut self,
+    ) -> Option<D::ViewMut<'a>> {
         let any: &mut dyn Any = self.any.as_mut();
-        Some(any.downcast_mut::<C>()?.view_mut())
+        Some(any.downcast_mut::<D>()?.view_mut())
     }
 }
 impl Deref for DataBox {
@@ -64,22 +86,24 @@ impl DerefMut for DataBox {
     }
 }
 
-pub trait DataTyped<T: 'static>: 'static + DataAny {
-    type View<'a>: DataRef<'a, T> + 'a
+pub trait DataSpecific: DataAny {
+    type Inner: Any;
+    type View<'a>: DataRef<'a, Self::Inner> + 'a
     where
         Self: 'a;
-    type ViewMut<'a>: DataMut<'a, T> + 'a
+    type ViewMut<'a>: DataMut<'a, Self::Inner> + 'a
     where
         Self: 'a;
 
     fn view<'a>(&'a self) -> Self::View<'a>;
     fn view_mut<'a>(&'a mut self) -> Self::ViewMut<'a>;
+    fn new() -> Self;
 }
-pub trait DataGeneric<T: 'static>: DataAny {
+pub trait DataGeneric<T: Any>: DataAny {
     fn boxed<'a>(&'a self) -> Box<dyn DataRef<'a, T> + 'a>;
     fn boxed_mut<'a>(&'a mut self) -> Box<dyn DataMut<'a, T> + 'a>;
 }
-impl<T: 'static, S: DataTyped<T> + DataAny> DataGeneric<T> for S {
+impl<T: Any, S: DataSpecific<Inner = T> + DataAny> DataGeneric<T> for S {
     fn boxed<'a>(&'a self) -> Box<dyn DataRef<'a, T> + 'a> {
         Box::new(self.view())
     }
@@ -87,10 +111,10 @@ impl<T: 'static, S: DataTyped<T> + DataAny> DataGeneric<T> for S {
         Box::new(self.view_mut())
     }
 }
-pub trait DataRef<'a, T: 'static> {
+pub trait DataRef<'a, T: Any> {
     fn read(&'a self, index: usize) -> Option<&'a T>;
 }
-pub trait DataMut<'a, T: 'static> {
+pub trait DataMut<'a, T: Any> {
     fn write(&'a mut self, index: usize, value: T);
 }
 
@@ -105,7 +129,8 @@ impl<T: 'static> DataAny for Vec<T> {
         self.reserve(additional);
     }
 }
-impl<T: 'static> DataTyped<T> for Vec<T> {
+impl<T: Any> DataSpecific for Vec<T> {
+    type Inner = T;
     type View<'a> = &'a [T];
     type ViewMut<'a> = &'a mut [T];
 
@@ -114,6 +139,9 @@ impl<T: 'static> DataTyped<T> for Vec<T> {
     }
     fn view_mut<'a>(&'a mut self) -> Self::ViewMut<'a> {
         &mut self[..]
+    }
+    fn new() -> Self {
+        Self::new()
     }
 }
 impl<'a, T: 'static> DataRef<'a, T> for &'a [T] {
@@ -139,7 +167,8 @@ impl DataAny for BitVec {
         self.reserve(additional);
     }
 }
-impl DataTyped<bool> for BitVec {
+impl DataSpecific for BitVec {
+    type Inner = bool;
     type View<'a> = &'a BitVec;
     type ViewMut<'a> = &'a mut BitVec;
 
@@ -148,6 +177,9 @@ impl DataTyped<bool> for BitVec {
     }
     fn view_mut<'a>(&'a mut self) -> Self::ViewMut<'a> {
         self
+    }
+    fn new() -> Self {
+        Self::new()
     }
 }
 impl<'a> DataRef<'a, bool> for &'a BitVec {
@@ -172,7 +204,8 @@ impl<T: 'static + Hash + Eq> DataAny for BiHashMap<usize, T> {
         self.reserve(additional);
     }
 }
-impl<T: 'static + Hash + Eq> DataTyped<T> for BiHashMap<usize, T> {
+impl<T: Any + Hash + Eq> DataSpecific for BiHashMap<usize, T> {
+    type Inner = T;
     type View<'a> = &'a Self;
     type ViewMut<'a> = &'a mut Self;
 
@@ -181,6 +214,9 @@ impl<T: 'static + Hash + Eq> DataTyped<T> for BiHashMap<usize, T> {
     }
     fn view_mut<'a>(&'a mut self) -> Self::ViewMut<'a> {
         self
+    }
+    fn new() -> Self {
+        Self::new()
     }
 }
 impl<'a, T: 'static + Hash + Eq> DataRef<'a, T> for &'a BiHashMap<usize, T> {
@@ -199,8 +235,18 @@ pub type ComponentId = u64;
 pub type New<T> = fn(&Data, &mut dyn DataMut<T>);
 
 pub struct Component {
+    pub(crate) name: &'static str,
+    pub(crate) inner_type: TypeId,
     pub(crate) id: ComponentId,
-    pub(crate) new: &'static Func,
+}
+impl Component {
+    pub const fn new<T: Any>(name: &'static str) -> Self {
+        Self {
+            name,
+            inner_type: TypeId::of::<T>(),
+            id: const_fnv1a_hash::fnv1a_hash_str_64(name),
+        }
+    }
 }
 
 #[derive(Default)]

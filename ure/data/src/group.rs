@@ -1,6 +1,6 @@
 use std::any::Any;
 
-use crate::{data::Component, func::Functions, Data, DataTyped, Func};
+use crate::{data::Component, func::Functions, Data, DataSpecific, Func};
 
 #[derive(Default)]
 pub struct Group {
@@ -15,9 +15,9 @@ impl Group {
     pub fn call_function(&mut self) {
         self.funcs.
     }
-    pub fn add_component<T: Any, D: DataTyped<T> + Default>(&mut self, comp: Component) {
+    pub fn add_component<T: Any, D: DataSpecific<T>>(&mut self, comp: Component) {
         self.add_function(comp.new);
-        self.data.insert(comp.id, Box::new(D::default()));
+        self.data.insert(comp.id, Box::new(D::new()));
         self.
     }
 }

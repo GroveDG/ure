@@ -13,11 +13,11 @@ impl Group {
         self.funcs.add(&self.data, func);
     }
     pub fn call_function(&mut self) {
-        self.funcs.
+        self.funcs.ge
     }
     pub fn add_component<T: Any, D: DataSpecific<T>>(&mut self, comp: Component) {
         self.add_function(comp.new);
-        self.data.insert(comp.id, Box::new(D::new()));
+        self.data.insert(comp.id, Box::new(D::new_data()));
         self.
     }
 }

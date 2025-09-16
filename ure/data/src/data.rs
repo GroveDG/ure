@@ -1,13 +1,15 @@
 use std::{
     any::{Any, TypeId},
+    borrow::{Borrow, BorrowMut},
     collections::HashMap,
-    hash::Hash,
-    ops::{Deref, DerefMut},
+    hash::{BuildHasher, Hash, Hasher, RandomState},
+    ops::{Deref, DerefMut, Index, IndexMut, Range},
     ptr::NonNull,
 };
 
-use bimap::BiHashMap;
-use bitvec::vec::BitVec;
+use bitvec::{slice::BitSlice, vec::BitVec};
+use hashbrown::HashTable;
+use indexmap::IndexSet;
 
 pub trait DataAny: Any {
     fn inner_type(&self) -> TypeId;
@@ -22,56 +24,11 @@ impl dyn DataAny {
     }
 }
 
-type TypedVtable = NonNull<()>;
+type GenericVtable = NonNull<()>;
 
 pub struct DataBox {
     any: Box<dyn DataAny>,
-    typed: TypedVtable,
-}
-impl<'a, T: Any> TryFrom<&'a DataBox> for &'a dyn DataGeneric<T> {
-    type Error = ();
-
-    fn try_from(value: &'a DataBox) -> Result<Self, Self::Error> {
-        if value.inner_type() != TypeId::of::<T>() {
-            return Err(());
-        }
-        let ptr = value.any.as_ref() as *const dyn DataAny;
-        let typed: *const dyn DataGeneric<T> =
-            unsafe { std::ptr::from_raw_parts(ptr as *const (), std::mem::transmute(value.typed)) };
-        unsafe { typed.as_ref().ok_or(()) }
-    }
-}
-
-impl DataBox {
-    pub fn cast_ref<'a, T: 'static>(&'a self) -> Option<&'a dyn DataGeneric<T>> {
-        if self.inner_type() != TypeId::of::<T>() {
-            return None;
-        }
-        let ptr = self.any.as_ref() as *const dyn DataAny;
-        let typed: *const dyn DataGeneric<T> =
-            unsafe { std::ptr::from_raw_parts(ptr as *const (), std::mem::transmute(self.typed)) };
-        unsafe { typed.as_ref() }
-    }
-    pub fn cast_mut<'a, T: 'static>(&'a mut self) -> Option<&'a mut dyn DataGeneric<T>> {
-        if self.inner_type() != TypeId::of::<T>() {
-            return None;
-        }
-        let ptr = self.any.as_mut() as *mut dyn DataAny;
-        let typed: *mut dyn DataGeneric<T> = unsafe {
-            std::ptr::from_raw_parts_mut(ptr as *mut (), std::mem::transmute(self.typed))
-        };
-        unsafe { typed.as_mut() }
-    }
-    pub fn downcast_ref<'a, D: DataSpecific<Inner = T>, T: Any>(&'a self) -> Option<D::View<'a>> {
-        let any: &dyn Any = self.any.as_ref();
-        Some(any.downcast_ref::<D>()?.view())
-    }
-    pub fn downcast_mut<'a, D: DataSpecific<Inner = T>, T: Any>(
-        &'a mut self,
-    ) -> Option<D::ViewMut<'a>> {
-        let any: &mut dyn Any = self.any.as_mut();
-        Some(any.downcast_mut::<D>()?.view_mut())
-    }
+    generic: GenericVtable,
 }
 impl Deref for DataBox {
     type Target = dyn DataAny;
@@ -86,42 +43,88 @@ impl DerefMut for DataBox {
     }
 }
 
-pub trait DataSpecific: DataAny {
-    type Inner: Any;
-    type View<'a>: DataRef<'a, Self::Inner> + 'a
-    where
-        Self: 'a;
-    type ViewMut<'a>: DataMut<'a, Self::Inner> + 'a
-    where
-        Self: 'a;
-
-    fn view<'a>(&'a self) -> Self::View<'a>;
-    fn view_mut<'a>(&'a mut self) -> Self::ViewMut<'a>;
-    fn new() -> Self;
+impl DataBox {
+    pub fn slice<'a, T: Any>(&'a self, range: Range<usize>) -> Option<Box<dyn DataSlice<T> + 'a>> {
+        if self.inner_type() != TypeId::of::<T>() {
+            return None;
+        }
+        let ptr = self.any.as_ref() as *const dyn DataAny;
+        let typed: &dyn DataGeneric<T> = unsafe {
+            std::ptr::from_raw_parts::<dyn DataGeneric<T>>(
+                ptr as *const (),
+                std::mem::transmute(self.generic),
+            )
+            .as_ref()?
+        };
+        Some(typed.boxed(range))
+    }
+    pub fn slice_mut<'a, T: Any>(
+        &'a mut self,
+        range: Range<usize>,
+    ) -> Option<Box<dyn DataSliceMut<T> + 'a>> {
+        if self.inner_type() != TypeId::of::<T>() {
+            return None;
+        }
+        let ptr = self.any.as_mut() as *mut dyn DataAny;
+        let typed: &mut dyn DataGeneric<T> = unsafe {
+            std::ptr::from_raw_parts_mut::<dyn DataGeneric<T>>(
+                ptr as *mut (),
+                std::mem::transmute(self.generic),
+            )
+            .as_mut()?
+        };
+        Some(typed.boxed_mut(range))
+    }
+    pub fn downcast_ref<'a, D: DataSpecific<Inner = T>, T: Any>(
+        &'a self,
+        range: Range<usize>,
+    ) -> Option<D::View<'a>> {
+        let any: &dyn Any = self.any.as_ref();
+        Some(any.downcast_ref::<D>()?.view(range))
+    }
+    pub fn downcast_mut<'a, D: DataSpecific<Inner = T>, T: Any>(
+        &'a mut self,
+        range: Range<usize>,
+    ) -> Option<D::ViewMut<'a>> {
+        let any: &mut dyn Any = self.any.as_mut();
+        Some(any.downcast_mut::<D>()?.view_mut(range))
+    }
 }
+
 pub trait DataGeneric<T: Any>: DataAny {
-    fn boxed<'a>(&'a self) -> Box<dyn DataRef<'a, T> + 'a>;
-    fn boxed_mut<'a>(&'a mut self) -> Box<dyn DataMut<'a, T> + 'a>;
+    fn boxed<'a>(&'a self, range: Range<usize>) -> Box<dyn DataSlice<T> + 'a>;
+    fn boxed_mut<'a>(&'a mut self, range: Range<usize>) -> Box<dyn DataSliceMut<T> + 'a>;
 }
 impl<T: Any, S: DataSpecific<Inner = T> + DataAny> DataGeneric<T> for S {
-    fn boxed<'a>(&'a self) -> Box<dyn DataRef<'a, T> + 'a> {
-        Box::new(self.view())
+    fn boxed<'a>(&'a self, range: Range<usize>) -> Box<dyn DataSlice<T> + 'a> {
+        Box::new(self.view(range))
     }
-    fn boxed_mut<'a>(&'a mut self) -> Box<dyn DataMut<'a, T> + 'a> {
-        Box::new(self.view_mut())
+    fn boxed_mut<'a>(&'a mut self, range: Range<usize>) -> Box<dyn DataSliceMut<T> + 'a> {
+        Box::new(self.view_mut(range))
     }
 }
-pub trait DataRef<'a, T: Any> {
-    fn read(&'a self, index: usize) -> Option<&'a T>;
+
+pub trait DataSpecific: DataAny {
+    type Inner: Any;
+    type View<'a>: DataSlice<Self::Inner>;
+    type ViewMut<'a>: DataSliceMut<Self::Inner>;
+
+    fn view<'a>(&'a self, range: Range<usize>) -> Self::View<'a>;
+    fn view_mut<'a>(&'a mut self, range: Range<usize>) -> Self::ViewMut<'a>;
+    fn new_data() -> Self;
 }
-pub trait DataMut<'a, T: Any> {
-    fn write(&'a mut self, index: usize, value: T);
+
+pub trait DataSlice<T: Any> {
+    fn get_data<'a>(&'a self, index: usize) -> &'a T;
+}
+pub trait DataSliceMut<T: Any>: DataSlice<T> {
+    fn set_data(&mut self, index: usize, value: T);
 }
 
 // ============================================================================
 //                                     Vec
 // ============================================================================
-impl<T: 'static> DataAny for Vec<T> {
+impl<T: Any> DataAny for Vec<T> {
     fn inner_type(&self) -> TypeId {
         TypeId::of::<T>()
     }
@@ -134,24 +137,32 @@ impl<T: Any> DataSpecific for Vec<T> {
     type View<'a> = &'a [T];
     type ViewMut<'a> = &'a mut [T];
 
-    fn view<'a>(&'a self) -> Self::View<'a> {
-        &self[..]
+    fn view<'a>(&'a self, range: Range<usize>) -> &'a [T] {
+        &self[range]
     }
-    fn view_mut<'a>(&'a mut self) -> Self::ViewMut<'a> {
-        &mut self[..]
+    fn view_mut<'a>(&'a mut self, range: Range<usize>) -> &'a mut [T] {
+        &mut self[range]
     }
-    fn new() -> Self {
+    fn new_data() -> Self {
         Self::new()
     }
 }
-impl<'a, T: 'static> DataRef<'a, T> for &'a [T] {
-    fn read(&'a self, index: usize) -> Option<&'a T> {
-        self.get(index)
+
+// Slice impl
+// ------------------------------------------------------
+impl<'s, T: Any> DataSlice<T> for &'s [T] {
+    fn get_data<'a>(&'a self, index: usize) -> &'a T {
+        &self[index]
     }
 }
-impl<'a, T: 'static> DataMut<'a, T> for &'a mut [T] {
-    fn write(&'a mut self, index: usize, value: T) {
+impl<'a, T: Any> DataSliceMut<T> for &'a mut [T] {
+    fn set_data(&mut self, index: usize, value: T) {
         self[index] = value;
+    }
+}
+impl<'s, T: Any> DataSlice<T> for &'s mut [T] {
+    fn get_data<'a>(&'a self, index: usize) -> &'a T {
+        &self[index]
     }
 }
 
@@ -162,41 +173,48 @@ impl DataAny for BitVec {
     fn inner_type(&self) -> TypeId {
         TypeId::of::<bool>()
     }
-
     fn reserve(&mut self, additional: usize) {
         self.reserve(additional);
     }
 }
 impl DataSpecific for BitVec {
     type Inner = bool;
-    type View<'a> = &'a BitVec;
-    type ViewMut<'a> = &'a mut BitVec;
+    type View<'a> = &'a BitSlice;
+    type ViewMut<'a> = &'a mut BitSlice;
 
-    fn view<'a>(&'a self) -> Self::View<'a> {
-        self
+    fn view<'a>(&'a self, range: Range<usize>) -> &'a BitSlice {
+        &self[range]
     }
-    fn view_mut<'a>(&'a mut self) -> Self::ViewMut<'a> {
-        self
+    fn view_mut<'a>(&'a mut self, range: Range<usize>) -> &'a mut BitSlice {
+        &mut self[range]
     }
-    fn new() -> Self {
+    fn new_data() -> Self {
         Self::new()
     }
 }
-impl<'a> DataRef<'a, bool> for &'a BitVec {
-    fn read(&'a self, index: usize) -> Option<&'a bool> {
-        Some(&self[index])
+
+// Slice impl
+// ------------------------------------------------------
+impl<'s> DataSlice<bool> for &'s BitSlice {
+    fn get_data<'a>(&'a self, index: usize) -> &'a bool {
+        &self[index]
     }
 }
-impl<'a> DataMut<'a, bool> for &'a mut BitVec {
-    fn write(&'a mut self, index: usize, value: bool) {
-        self.set(index, value)
+impl<'a> DataSliceMut<bool> for &'a mut BitSlice {
+    fn set_data(&mut self, index: usize, value: bool) {
+        self.set(index, value);
+    }
+}
+impl<'s> DataSlice<bool> for &'s mut BitSlice {
+    fn get_data<'a>(&'a self, index: usize) -> &'a bool {
+        &self[index]
     }
 }
 
 // ============================================================================
 //                                    Bimap
 // ============================================================================
-impl<T: 'static + Hash + Eq> DataAny for BiHashMap<usize, T> {
+impl<T: Any + Hash + Eq> DataAny for IndexSet<T> {
     fn inner_type(&self) -> TypeId {
         TypeId::of::<T>()
     }
@@ -204,35 +222,54 @@ impl<T: 'static + Hash + Eq> DataAny for BiHashMap<usize, T> {
         self.reserve(additional);
     }
 }
-impl<T: Any + Hash + Eq> DataSpecific for BiHashMap<usize, T> {
+impl<T: Any + Hash + Eq> DataSpecific for IndexSet<T> {
     type Inner = T;
-    type View<'a> = &'a Self;
-    type ViewMut<'a> = &'a mut Self;
+    type View<'a> = &'a IndexSet<T>;
+    type ViewMut<'a> = BiMapSliceMut<'a, T>;
 
-    fn view<'a>(&'a self) -> Self::View<'a> {
-        self
+    fn view<'a>(&'a self, range: Range<usize>) -> Self::View<'a> {
+        BiMapSlice {
+            inner: self,
+            start: range.start,
+            len: range.len(),
+        }
     }
-    fn view_mut<'a>(&'a mut self) -> Self::ViewMut<'a> {
-        self
+    fn view_mut<'a>(&'a mut self, range: Range<usize>) -> Self::ViewMut<'a> {
+        BiMapSliceMut {
+            inner: self,
+            start: range.start,
+            len: range.len(),
+        }
     }
-    fn new() -> Self {
+    fn new_data() -> Self {
         Self::new()
     }
 }
-impl<'a, T: 'static + Hash + Eq> DataRef<'a, T> for &'a BiHashMap<usize, T> {
-    fn read(&'a self, index: usize) -> Option<&'a T> {
-        self.get_by_left(&index)
+// Slice struct
+// ------------------------------------------------------
+
+// Slice impl
+// ------------------------------------------------------
+impl<'s, T: Any + Hash + Eq> DataSlice<T> for BiMapSlice<'s, T> {
+    fn get_data<'a>(&'a self, index: usize) -> &'a T {
+        &self.inner.vec[index]
     }
 }
-impl<'a, T: 'static + Hash + Eq> DataMut<'a, T> for &'a mut BiHashMap<usize, T> {
-    fn write(&'a mut self, index: usize, value: T) {
-        let overwrite = self.insert(index, value);
-        assert!(overwrite.did_overwrite());
+impl<'s, T: Any + Hash + Eq> DataSliceMut<T> for BiMapSliceMut<'s, T> {
+    fn set_data(&mut self, index: usize, value: T) {
+        self.set(value);
+    }
+}
+impl<'s, T: Any + Hash + Eq> DataSlice<T> for BiMapSliceMut<'s, T> {
+    fn get_data<'a>(&'a self, index: usize) -> &'a T {
+        &self.inner.vec[index]
     }
 }
 
+// ============================================================================
+
 pub type ComponentId = u64;
-pub type New<T> = fn(&Data, &mut dyn DataMut<T>);
+pub type New<T> = fn(&Data, &mut dyn DataSliceMut<T>);
 
 pub struct Component {
     pub(crate) name: &'static str,
@@ -256,11 +293,14 @@ pub struct Data {
     cap: usize,
 }
 impl Data {
-    pub(crate) fn insert<T: 'static>(&mut self, id: ComponentId, data: Box<dyn DataGeneric<T>>) {
+    pub(crate) fn insert<T: Any>(&mut self, id: ComponentId, data: Box<dyn DataGeneric<T>>) {
         let ptr = data.as_ref() as *const dyn DataGeneric<T>;
         let typed = unsafe { std::mem::transmute(std::ptr::metadata(ptr)) };
         let any: Box<dyn DataAny> = data;
-        let boxed = DataBox { any, typed };
+        let boxed = DataBox {
+            any,
+            generic: typed,
+        };
         self.data.insert(id, boxed);
     }
     pub(crate) fn reserve(&mut self, additional: usize) {

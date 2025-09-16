@@ -4,6 +4,7 @@
 #![feature(slice_ptr_get)]
 #![feature(const_trait_impl)]
 #![feature(const_cmp)]
+#![allow(refining_impl_trait)]
 
 mod data;
 mod func;
@@ -11,7 +12,7 @@ mod group;
 mod resource;
 
 pub use data::{
-    Component, ComponentId, Data, DataAny, DataBox, DataGeneric, DataMut, DataRef, DataSpecific,
+    Component, ComponentId, Data, DataAny, DataBox, DataGeneric, DataSliceMut, DataRef, DataSpecific,
 };
 pub use func::{Impl, FuncId, Func, Implr, ImplError};
 pub use group::Group;

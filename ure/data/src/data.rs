@@ -21,7 +21,7 @@ pub struct DataBox {
 }
 
 impl DataBox {
-    pub fn slice_ref<'a, T: Any>(&'a self) -> Option<&'a dyn DataSlice<T>> {
+    pub fn slice_ref<T: Any>(&self) -> Option<&dyn DataSlice<T>> {
         if self.inner_type() != TypeId::of::<T>() {
             return None;
         }
@@ -35,7 +35,7 @@ impl DataBox {
         };
         Some(typed.generic())
     }
-    pub fn slice_mut<'a, T: Any>(&'a mut self) -> Option<&'a mut dyn DataSlice<T>> {
+    pub fn slice_mut<T: Any>(&mut self) -> Option<&mut dyn DataSlice<T>> {
         if self.inner_type() != TypeId::of::<T>() {
             return None;
         }
@@ -49,13 +49,11 @@ impl DataBox {
         };
         Some(typed.generic_mut())
     }
-    pub fn downcast_ref<'a, D: DataSpecific<Inner = T>, T: Any>(&'a self) -> Option<&'a D::Slice> {
+    pub fn downcast_ref<D: DataSpecific<Inner = T>, T: Any>(&self) -> Option<&D::Slice> {
         let any: &dyn Any = self.any.as_ref();
         Some(any.downcast_ref::<D>()?.slice_ref())
     }
-    pub fn downcast_mut<'a, D: DataSpecific<Inner = T>, T: Any>(
-        &'a mut self,
-    ) -> Option<&'a mut D::Slice> {
+    pub fn downcast_mut<D: DataSpecific<Inner = T>, T: Any>(&mut self) -> Option<&mut D::Slice> {
         let any: &mut dyn Any = self.any.as_mut();
         Some(any.downcast_mut::<D>()?.slice_mut())
     }
@@ -84,10 +82,10 @@ impl dyn DataAny {
     pub fn inner_is<T: Any>(&self) -> bool {
         self.inner_type() == TypeId::of::<T>()
     }
-    pub fn downcast_ref<'a, T: Any, D: DataSpecific<Inner = T>>(&'a self) -> Option<&'a D> {
+    pub fn downcast_ref<T: Any, D: DataSpecific<Inner = T>>(&self) -> Option<&D> {
         (self as &dyn Any).downcast_ref()
     }
-    pub fn downcast_mut<'a, T: Any, D: DataSpecific<Inner = T>>(&'a mut self) -> Option<&'a mut D> {
+    pub fn downcast_mut<T: Any, D: DataSpecific<Inner = T>>(&mut self) -> Option<&mut D> {
         (self as &mut dyn Any).downcast_mut()
     }
 }
@@ -96,20 +94,20 @@ pub trait DataSpecific: DataAny {
     type Inner: Any;
     type Slice: DataSlice<Self::Inner>;
 
-    fn slice_ref<'a>(&'a self) -> &'a Self::Slice;
-    fn slice_mut<'a>(&'a mut self) -> &'a mut Self::Slice;
+    fn slice_ref(&self) -> &Self::Slice;
+    fn slice_mut(&mut self) -> &mut Self::Slice;
     fn new_data() -> Self;
 }
 
 pub trait DataGeneric<T: Any>: DataAny {
-    fn generic<'a>(&'a self) -> &'a dyn DataSlice<T>;
-    fn generic_mut<'a>(&'a mut self) -> &'a mut dyn DataSlice<T>;
+    fn generic(&self) -> &dyn DataSlice<T>;
+    fn generic_mut(&mut self) -> &mut dyn DataSlice<T>;
 }
 impl<T: Any, S: DataSpecific<Inner = T> + DataAny> DataGeneric<T> for S {
-    fn generic<'a>(&'a self) -> &'a dyn DataSlice<T> {
+    fn generic(&self) -> &dyn DataSlice<T> {
         self.slice_ref()
     }
-    fn generic_mut<'a>(&'a mut self) -> &'a mut dyn DataSlice<T> {
+    fn generic_mut(&mut self) -> &mut dyn DataSlice<T> {
         self.slice_mut()
     }
 }
@@ -120,10 +118,10 @@ pub trait DataSlice<T: Any>: Any {
 }
 
 impl<T> dyn DataSlice<T> {
-    pub fn downcast_ref<'a, D: DataSpecific<Inner = T>>(&'a self) -> Option<&'a D::Slice> {
+    pub fn downcast_ref<D: DataSpecific<Inner = T>>(&self) -> Option<&D::Slice> {
         (self as &dyn Any).downcast_ref()
     }
-    pub fn downcast_mut<'a, D: DataSpecific<Inner = T>>(&'a mut self) -> Option<&'a mut D::Slice> {
+    pub fn downcast_mut<D: DataSpecific<Inner = T>>(&mut self) -> Option<&mut D::Slice> {
         (self as &mut dyn Any).downcast_mut()
     }
 }
@@ -192,16 +190,16 @@ impl Data {
             _marker: std::marker::PhantomData,
         })
     }
-    pub fn get<'a>(&'a self, id: &ComponentId) -> Option<&'a DataBox> {
+    pub fn get(&self, id: &ComponentId) -> Option<&DataBox> {
         self.data.get(id)
     }
-    pub fn get_mut<'a>(&'a mut self, id: &ComponentId) -> Option<&'a mut DataBox> {
+    pub fn get_mut(&mut self, id: &ComponentId) -> Option<&mut DataBox> {
         self.data.get_mut(id)
     }
-    pub fn get_mut_disjoint<'a, const N: usize>(
-        &'a mut self,
+    pub fn get_mut_disjoint<const N: usize>(
+        &mut self,
         ids: [&ComponentId; N],
-    ) -> [Option<&'a mut DataBox>; N] {
+    ) -> [Option<&mut DataBox>; N] {
         self.data.get_disjoint_mut(ids)
     }
 }

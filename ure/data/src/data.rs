@@ -13,42 +13,11 @@ pub mod bimap;
 pub mod bitvec;
 pub mod vec;
 
-pub trait DataAny: Any {
-    fn inner_type(&self) -> TypeId;
-    fn reserve(&mut self, additional: usize);
-}
-impl dyn DataAny {
-    pub fn is<D: DataGeneric<T>, T: Any>(&self) -> bool {
-        (self as &dyn Any).is::<D>()
-    }
-    pub fn inner_is<T: Any>(&self) -> bool {
-        self.inner_type() == TypeId::of::<T>()
-    }
-    pub fn downcast_ref<'a, T: Any, D: DataSpecific<Inner = T>>(&'a self) -> Option<&'a D> {
-        (self as &dyn Any).downcast_ref()
-    }
-    pub fn downcast_mut<'a, T: Any, D: DataSpecific<Inner = T>>(&'a mut self) -> Option<&'a mut D> {
-        (self as &mut dyn Any).downcast_mut()
-    }
-}
-
 type GenericVtable = NonNull<()>;
 
 pub struct DataBox {
     any: Box<dyn DataAny>,
     generic: GenericVtable,
-}
-impl Deref for DataBox {
-    type Target = dyn DataAny;
-
-    fn deref(&self) -> &Self::Target {
-        self.any.as_ref()
-    }
-}
-impl DerefMut for DataBox {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.any.as_mut()
-    }
 }
 
 impl DataBox {
@@ -91,6 +60,46 @@ impl DataBox {
         Some(any.downcast_mut::<D>()?.slice_mut())
     }
 }
+impl Deref for DataBox {
+    type Target = dyn DataAny;
+
+    fn deref(&self) -> &Self::Target {
+        self.any.as_ref()
+    }
+}
+impl DerefMut for DataBox {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.any.as_mut()
+    }
+}
+
+pub trait DataAny: Any {
+    fn inner_type(&self) -> TypeId;
+    fn reserve(&mut self, additional: usize);
+}
+impl dyn DataAny {
+    pub fn is<D: DataGeneric<T>, T: Any>(&self) -> bool {
+        (self as &dyn Any).is::<D>()
+    }
+    pub fn inner_is<T: Any>(&self) -> bool {
+        self.inner_type() == TypeId::of::<T>()
+    }
+    pub fn downcast_ref<'a, T: Any, D: DataSpecific<Inner = T>>(&'a self) -> Option<&'a D> {
+        (self as &dyn Any).downcast_ref()
+    }
+    pub fn downcast_mut<'a, T: Any, D: DataSpecific<Inner = T>>(&'a mut self) -> Option<&'a mut D> {
+        (self as &mut dyn Any).downcast_mut()
+    }
+}
+
+pub trait DataSpecific: DataAny {
+    type Inner: Any;
+    type Slice: DataSlice<Self::Inner>;
+
+    fn slice_ref<'a>(&'a self) -> &'a Self::Slice;
+    fn slice_mut<'a>(&'a mut self) -> &'a mut Self::Slice;
+    fn new_data() -> Self;
+}
 
 pub trait DataGeneric<T: Any>: DataAny {
     fn generic<'a>(&'a self) -> &'a dyn DataSlice<T>;
@@ -105,6 +114,11 @@ impl<T: Any, S: DataSpecific<Inner = T> + DataAny> DataGeneric<T> for S {
     }
 }
 
+pub trait DataSlice<T: Any>: Any {
+    fn get_data<'a>(&'a self, index: ValidIndex) -> &'a T;
+    fn set_data(&mut self, index: ValidIndex, value: T);
+}
+
 impl<T> dyn DataSlice<T> {
     pub fn downcast_ref<'a, D: DataSpecific<Inner = T>>(&'a self) -> Option<&'a D::Slice> {
         (self as &dyn Any).downcast_ref()
@@ -112,20 +126,6 @@ impl<T> dyn DataSlice<T> {
     pub fn downcast_mut<'a, D: DataSpecific<Inner = T>>(&'a mut self) -> Option<&'a mut D::Slice> {
         (self as &mut dyn Any).downcast_mut()
     }
-}
-
-pub trait DataSpecific: DataAny {
-    type Inner: Any;
-    type Slice: DataSlice<Self::Inner>;
-
-    fn slice_ref<'a>(&'a self) -> &'a Self::Slice;
-    fn slice_mut<'a>(&'a mut self) -> &'a mut Self::Slice;
-    fn new_data() -> Self;
-}
-
-pub trait DataSlice<T: Any>: Any {
-    fn get_data<'a>(&'a self, index: ValidIndex) -> &'a T;
-    fn set_data(&mut self, index: ValidIndex, value: T);
 }
 
 pub type ComponentId = u64;

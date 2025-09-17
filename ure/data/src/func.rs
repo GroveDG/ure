@@ -101,7 +101,7 @@ macro_rules! func {
                     let mut components = data.get_mut_disjoint(COMPONENTS_IDS);
                     let mut i = 0;
                     $(
-                        let $comp = components[i].as_mut().unwrap()
+                        let (mooring, $comp) = components[i].as_mut().unwrap()
                         $(
                             .downcast_mut::<$cont, _>().unwrap();
                         )?
@@ -155,12 +155,37 @@ macro_rules! func {
 
 const C1: Component = Component::new::<usize>("indices");
 
-pub const EXAMPLE: Func = func! {
-    (range, &C1)
-    (indices: => usize)
-    {
-        for i in range {
-            indices.get_data(i);
+pub const EXAMPLE: Func = {
+    const COMPONENTS: &'static[&'static crate::data::Component] =  &[(&C1)];
+    const COMPONENTS_IDS:[&'static crate::data::ComponentId;
+    COMPONENTS.len()] = [&(&C1).id];
+    #[allow(unused_variables,unused_assignments,unused_mut)]
+    const IMPLS: &'static[crate::func::Impl] =  &[{
+        |data,range|{
+            let mut components = data.get_mut_disjoint(COMPONENTS_IDS);
+            let mut i = 0;
+            let(mooring,indices) = components[i].as_mut().unwrap().slice_ref::<usize>().unwrap();
+            i+=1;
+            {
+                for i in range {
+                    indices.get_data(i);
+                }
+            }
         }
+    },];
+    #[allow(unused_assignments)]
+    fn implr(data: &crate::data::Data) -> Result<crate::func::Impl,ImplError>{
+        let data_boxes:[&crate::data::DataBox;
+        _] = [data.get(&(&C1).id).ok_or(crate::func::ImplError::MissingComponent((&C1).name))?,];
+        let mut impl_i = 0;
+        let mut typed:bool = true;
+        let mut i = 0;
+        typed&=data_boxes[i].inner_is::<usize>();
+        i+=1;
+        if typed {
+            return Ok(IMPLS[impl_i]);
+        }impl_i+=1;
+        Err(crate::func::ImplError::NoValidSignature)
     }
+    crate::func::Func::new(stringify!($name),COMPONENTS,implr)
 };

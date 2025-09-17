@@ -2,7 +2,7 @@ use std::{any::{Any, TypeId}, fmt::Debug, hash::Hash};
 
 use indexmap::IndexSet;
 
-use crate::data::{DataAny, DataSlice, DataSpecific};
+use crate::data::{DataAny, DataSlice, DataSpecific, Mooring};
 
 impl<T: Any + Hash + Eq + Debug> DataAny for IndexSet<T> {
     fn inner_type(&self) -> TypeId {
@@ -16,11 +16,11 @@ impl<T: Any + Hash + Eq + Debug> DataSpecific for IndexSet<T> {
     type Inner = T;
     type Slice = BimapSlice<T>;
 
-    fn slice_ref<'a>(&'a self) -> &'a Self::Slice {
-        BimapSlice::from_bimap(self)
+    fn slice_ref<'a: 'b, 'b>(&'a self) -> (Mooring<'a>, &'b Self::Slice) {
+        (None, BimapSlice::from_bimap(self))
     }
-    fn slice_mut<'a>(&'a mut self) -> &'a mut Self::Slice {
-        BimapSlice::from_bimap_mut(self)
+    fn slice_mut<'a: 'b, 'b>(&'a mut self) -> (Mooring<'a>, &'b mut Self::Slice) {
+        (None, BimapSlice::from_bimap_mut(self))
     }
     fn new_data() -> Self {
         Self::new()

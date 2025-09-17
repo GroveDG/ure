@@ -82,10 +82,10 @@ where
 // Slice impl
 // ------------------------------------------------------
 impl DataSlice<bool> for UnboundBitSlice {
-    fn get_data<'a>(&'a self, index: ValidIndex) -> &'a bool {
+    fn get_data<'a>(&'a self, index: ValidIndex<'a>) -> &'a bool {
         &self[index.into()]
     }
-    fn set_data(&mut self, index: ValidIndex, value: bool) {
+    fn set_data<'a>(&'a mut self, index: ValidIndex<'a>, value: bool) {
         self.set(index.into(), value);
     }
 }

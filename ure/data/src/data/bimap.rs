@@ -44,11 +44,11 @@ impl<T: Any> BimapSlice<T> {
 // Slice impl
 // ------------------------------------------------------
 impl<T: Any + Hash + Eq + Debug> DataSlice<T> for BimapSlice<T> {
-    fn get_data<'a>(&'a self, index: super::ValidIndex) -> &'a T {
+    fn get_data<'a>(&'a self, index: super::ValidIndex<'a>) -> &'a T {
         self.inner.get_index(index.inner()).unwrap()
     }
 
-    fn set_data(&mut self, index: super::ValidIndex, value: T) {
+    fn set_data<'a>(&'a mut self, index: super::ValidIndex<'a>, value: T) {
         self.inner.replace_index(index.inner(), value).unwrap();
     }
 }

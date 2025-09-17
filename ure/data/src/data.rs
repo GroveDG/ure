@@ -115,8 +115,8 @@ impl<T: Any, S: DataSpecific<Inner = T> + DataAny> DataGeneric<T> for S {
 }
 
 pub trait DataSlice<T: Any>: Any {
-    fn get_data<'a>(&'a self, index: ValidIndex) -> &'a T;
-    fn set_data(&mut self, index: ValidIndex, value: T);
+    fn get_data<'a>(&'a self, index: ValidIndex<'a>) -> &'a T;
+    fn set_data<'a>(&'a mut self, index: ValidIndex<'a>, value: T);
 }
 
 impl<T> dyn DataSlice<T> {

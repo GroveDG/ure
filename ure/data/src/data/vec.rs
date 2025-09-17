@@ -64,10 +64,10 @@ impl<T> IndexMut<usize> for UnboundSlice<T> {
 // Slice impl
 // ------------------------------------------------------
 impl<T: Any> DataSlice<T> for UnboundSlice<T> {
-    fn get_data<'a>(&'a self, index: ValidIndex) -> &'a T {
+    fn get_data<'a>(&'a self, index: ValidIndex<'a>) -> &'a T {
         &self[index.into()]
     }
-    fn set_data(&mut self, index: ValidIndex, value: T) {
+    fn set_data<'a>(&'a mut self, index: ValidIndex<'a>, value: T) {
         self[index.into()] = value;
     }
 }

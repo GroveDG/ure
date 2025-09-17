@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Display};
 
 use nohash_hasher::BuildNoHashHasher;
 
-use crate::{Component, Data};
+use crate::data::{Component, Data, ValidRange};
 
 pub type FuncAndImpl = (&'static Func, Impl);
 
@@ -20,11 +20,8 @@ impl Functions {
         self.funcs.insert(func.id, (func, im));
         None
     }
-    pub fn call(&self, data: &mut Data, func: &'static Func) {
-        let Some((_, im)) = self.funcs.get(&func.id) else {
-            return
-        };
-        (im)(data);
+    pub fn get(&self, func: &'static Func) -> Option<Impl> {
+        Some(self.funcs.get(&func.id)?.1)
     }
     pub fn reimpl(&mut self, data: &Data) -> Option<ImplError> {
         for (func, i) in self.funcs.values_mut() {
@@ -37,10 +34,11 @@ impl Functions {
     }
 }
 
-pub type Impl = fn(&mut Data);
+pub type Impl = fn(&mut Data, ValidRange);
 pub type Implr = fn(&Data) -> Result<Impl, ImplError>;
 pub type FuncId = u64;
 
+#[derive(Debug)]
 pub struct Func {
     pub(crate) name: &'static str,
     pub(crate) id: FuncId,
@@ -83,22 +81,23 @@ impl std::error::Error for ImplError {}
 #[macro_export]
 macro_rules! func {
     (
-        $name:ident ($($components:expr),+ $(,)?)
+        ($range:ident, $($components:expr),+ $(,)?)
         $(
             ( $($comp:ident : $($cont:ty)? $(=> $data_ty:ty)?),+ )
             $body:block
         )+
     ) => {
-        const COMPONENTS: &'static [&'static $crate::Component] = &[
+    {
+        const COMPONENTS: &'static [&'static $crate::data::Component] = &[
             $($components),+
         ];
-        const COMPONENTS_IDS: [&'static $crate::ComponentId; COMPONENTS.len()] = [
+        const COMPONENTS_IDS: [&'static $crate::data::ComponentId; COMPONENTS.len()] = [
             $(&$components.id),+
         ];
         #[allow(unused_variables, unused_assignments, unused_mut)]
-        const IMPLS: &'static [$crate::Impl] = &[
+        const IMPLS: &'static [$crate::func::Impl] = &[
             $({
-                |data| {
+                |data, $range| {
                     let mut components = data.get_mut_disjoint(COMPONENTS_IDS);
                     let mut i = 0;
                     $(
@@ -107,7 +106,7 @@ macro_rules! func {
                             .downcast_mut::<$cont, _>().unwrap();
                         )?
                         $(
-                            .cast_mut::<$data_ty>().unwrap();
+                            .slice_ref::<$data_ty>().unwrap();
                         )?
                         i += 1;
                     )+
@@ -115,10 +114,11 @@ macro_rules! func {
                 }
             },)+
         ];
-        fn implr(data: &$crate::Data) -> Result<$crate::Impl, ImplError> {
-            let data_boxes: [&$crate::DataBox; _] = [
+        #[allow(unused_assignments)]
+        fn implr(data: &$crate::data::Data) -> Result<$crate::func::Impl, ImplError> {
+            let data_boxes: [&$crate::data::DataBox; _] = [
                 $(data.get(&$components.id).ok_or(
-                    $crate::ImplError::MissingComponent($components.name)
+                    $crate::func::ImplError::MissingComponent($components.name)
                 )?,)+
             ];
             let mut impl_i = 0;
@@ -140,25 +140,27 @@ macro_rules! func {
                 }
                 impl_i += 1;
             )+
-            Err($crate::ImplError::NoValidSignature)
+            Err($crate::func::ImplError::NoValidSignature)
         }
 
 
-        const $name: $crate::Func = $crate::Func::new(
+        $crate::func::Func::new(
             stringify!($name),
             COMPONENTS,
             implr
-        );
+        )
+    }
     };
 }
 
 const C1: Component = Component::new::<usize>("indices");
-use crate::DataRef;
 
-func!{
-    EXAMPLE (&C1)
+pub const EXAMPLE: Func = func! {
+    (range, &C1)
     (indices: => usize)
     {
-        indices.read(0);
+        for i in range {
+            indices.get_data(i);
+        }
     }
-}
+};

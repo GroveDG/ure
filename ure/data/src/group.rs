@@ -1,6 +1,9 @@
-use std::any::Any;
+use std::ops::RangeBounds;
 
-use crate::{data::Component, func::Functions, Data, DataSpecific, Func};
+use crate::{
+    data::Data,
+    func::{Func, Functions},
+};
 
 #[derive(Default)]
 pub struct Group {
@@ -12,12 +15,13 @@ impl Group {
     pub fn add_function(&mut self, func: &'static Func) {
         self.funcs.add(&self.data, func);
     }
-    pub fn call_function(&mut self) {
-        self.funcs.ge
-    }
-    pub fn add_component<T: Any, D: DataSpecific<T>>(&mut self, comp: Component) {
-        self.add_function(comp.new);
-        self.data.insert(comp.id, Box::new(D::new_data()));
-        self.
+    pub fn call(&mut self, func: &'static Func, range: impl RangeBounds<usize>) {
+        let Some(range) = self.data.validate_range(range) else {
+            return;
+        };
+        let Some(func) = self.funcs.get(func) else {
+            return;
+        };
+        (func)(&mut self.data, range)
     }
 }

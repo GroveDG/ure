@@ -1,15 +1,17 @@
 use std::{
     any::{Any, TypeId},
-    borrow::{Borrow, BorrowMut},
     collections::HashMap,
-    hash::{BuildHasher, Hash, Hasher, RandomState},
-    ops::{Deref, DerefMut, Index, IndexMut, Range},
+    ops::{Deref, DerefMut, Range, RangeBounds},
     ptr::NonNull,
 };
 
-use bitvec::{slice::BitSlice, vec::BitVec};
-use hashbrown::HashTable;
-use indexmap::IndexSet;
+mod index;
+pub use index::{ValidIndex, ValidRange};
+
+// Containers
+pub mod bimap;
+pub mod bitvec;
+pub mod vec;
 
 pub trait DataAny: Any {
     fn inner_type(&self) -> TypeId;
@@ -21,6 +23,12 @@ impl dyn DataAny {
     }
     pub fn inner_is<T: Any>(&self) -> bool {
         self.inner_type() == TypeId::of::<T>()
+    }
+    pub fn downcast_ref<'a, T: Any, D: DataSpecific<Inner = T>>(&'a self) -> Option<&'a D> {
+        (self as &dyn Any).downcast_ref()
+    }
+    pub fn downcast_mut<'a, T: Any, D: DataSpecific<Inner = T>>(&'a mut self) -> Option<&'a mut D> {
+        (self as &mut dyn Any).downcast_mut()
     }
 }
 
@@ -44,7 +52,7 @@ impl DerefMut for DataBox {
 }
 
 impl DataBox {
-    pub fn slice<'a, T: Any>(&'a self, range: Range<usize>) -> Option<Box<dyn DataSlice<T> + 'a>> {
+    pub fn slice_ref<'a, T: Any>(&'a self) -> Option<&'a dyn DataSlice<T>> {
         if self.inner_type() != TypeId::of::<T>() {
             return None;
         }
@@ -56,12 +64,9 @@ impl DataBox {
             )
             .as_ref()?
         };
-        Some(typed.boxed(range))
+        Some(typed.generic())
     }
-    pub fn slice_mut<'a, T: Any>(
-        &'a mut self,
-        range: Range<usize>,
-    ) -> Option<Box<dyn DataSliceMut<T> + 'a>> {
+    pub fn slice_mut<'a, T: Any>(&'a mut self) -> Option<&'a mut dyn DataSlice<T>> {
         if self.inner_type() != TypeId::of::<T>() {
             return None;
         }
@@ -73,204 +78,60 @@ impl DataBox {
             )
             .as_mut()?
         };
-        Some(typed.boxed_mut(range))
+        Some(typed.generic_mut())
     }
-    pub fn downcast_ref<'a, D: DataSpecific<Inner = T>, T: Any>(
-        &'a self,
-        range: Range<usize>,
-    ) -> Option<D::View<'a>> {
+    pub fn downcast_ref<'a, D: DataSpecific<Inner = T>, T: Any>(&'a self) -> Option<&'a D::Slice> {
         let any: &dyn Any = self.any.as_ref();
-        Some(any.downcast_ref::<D>()?.view(range))
+        Some(any.downcast_ref::<D>()?.slice_ref())
     }
     pub fn downcast_mut<'a, D: DataSpecific<Inner = T>, T: Any>(
         &'a mut self,
-        range: Range<usize>,
-    ) -> Option<D::ViewMut<'a>> {
+    ) -> Option<&'a mut D::Slice> {
         let any: &mut dyn Any = self.any.as_mut();
-        Some(any.downcast_mut::<D>()?.view_mut(range))
+        Some(any.downcast_mut::<D>()?.slice_mut())
     }
 }
 
 pub trait DataGeneric<T: Any>: DataAny {
-    fn boxed<'a>(&'a self, range: Range<usize>) -> Box<dyn DataSlice<T> + 'a>;
-    fn boxed_mut<'a>(&'a mut self, range: Range<usize>) -> Box<dyn DataSliceMut<T> + 'a>;
+    fn generic<'a>(&'a self) -> &'a dyn DataSlice<T>;
+    fn generic_mut<'a>(&'a mut self) -> &'a mut dyn DataSlice<T>;
 }
 impl<T: Any, S: DataSpecific<Inner = T> + DataAny> DataGeneric<T> for S {
-    fn boxed<'a>(&'a self, range: Range<usize>) -> Box<dyn DataSlice<T> + 'a> {
-        Box::new(self.view(range))
+    fn generic<'a>(&'a self) -> &'a dyn DataSlice<T> {
+        self.slice_ref()
     }
-    fn boxed_mut<'a>(&'a mut self, range: Range<usize>) -> Box<dyn DataSliceMut<T> + 'a> {
-        Box::new(self.view_mut(range))
+    fn generic_mut<'a>(&'a mut self) -> &'a mut dyn DataSlice<T> {
+        self.slice_mut()
+    }
+}
+
+impl<T> dyn DataSlice<T> {
+    pub fn downcast_ref<'a, D: DataSpecific<Inner = T>>(&'a self) -> Option<&'a D::Slice> {
+        (self as &dyn Any).downcast_ref()
+    }
+    pub fn downcast_mut<'a, D: DataSpecific<Inner = T>>(&'a mut self) -> Option<&'a mut D::Slice> {
+        (self as &mut dyn Any).downcast_mut()
     }
 }
 
 pub trait DataSpecific: DataAny {
     type Inner: Any;
-    type View<'a>: DataSlice<Self::Inner>;
-    type ViewMut<'a>: DataSliceMut<Self::Inner>;
+    type Slice: DataSlice<Self::Inner>;
 
-    fn view<'a>(&'a self, range: Range<usize>) -> Self::View<'a>;
-    fn view_mut<'a>(&'a mut self, range: Range<usize>) -> Self::ViewMut<'a>;
+    fn slice_ref<'a>(&'a self) -> &'a Self::Slice;
+    fn slice_mut<'a>(&'a mut self) -> &'a mut Self::Slice;
     fn new_data() -> Self;
 }
 
-pub trait DataSlice<T: Any> {
-    fn get_data<'a>(&'a self, index: usize) -> &'a T;
+pub trait DataSlice<T: Any>: Any {
+    fn get_data<'a>(&'a self, index: ValidIndex) -> &'a T;
+    fn set_data(&mut self, index: ValidIndex, value: T);
 }
-pub trait DataSliceMut<T: Any>: DataSlice<T> {
-    fn set_data(&mut self, index: usize, value: T);
-}
-
-// ============================================================================
-//                                     Vec
-// ============================================================================
-impl<T: Any> DataAny for Vec<T> {
-    fn inner_type(&self) -> TypeId {
-        TypeId::of::<T>()
-    }
-    fn reserve(&mut self, additional: usize) {
-        self.reserve(additional);
-    }
-}
-impl<T: Any> DataSpecific for Vec<T> {
-    type Inner = T;
-    type View<'a> = &'a [T];
-    type ViewMut<'a> = &'a mut [T];
-
-    fn view<'a>(&'a self, range: Range<usize>) -> &'a [T] {
-        &self[range]
-    }
-    fn view_mut<'a>(&'a mut self, range: Range<usize>) -> &'a mut [T] {
-        &mut self[range]
-    }
-    fn new_data() -> Self {
-        Self::new()
-    }
-}
-
-// Slice impl
-// ------------------------------------------------------
-impl<'s, T: Any> DataSlice<T> for &'s [T] {
-    fn get_data<'a>(&'a self, index: usize) -> &'a T {
-        &self[index]
-    }
-}
-impl<'a, T: Any> DataSliceMut<T> for &'a mut [T] {
-    fn set_data(&mut self, index: usize, value: T) {
-        self[index] = value;
-    }
-}
-impl<'s, T: Any> DataSlice<T> for &'s mut [T] {
-    fn get_data<'a>(&'a self, index: usize) -> &'a T {
-        &self[index]
-    }
-}
-
-// ============================================================================
-//                                   BitVec
-// ============================================================================
-impl DataAny for BitVec {
-    fn inner_type(&self) -> TypeId {
-        TypeId::of::<bool>()
-    }
-    fn reserve(&mut self, additional: usize) {
-        self.reserve(additional);
-    }
-}
-impl DataSpecific for BitVec {
-    type Inner = bool;
-    type View<'a> = &'a BitSlice;
-    type ViewMut<'a> = &'a mut BitSlice;
-
-    fn view<'a>(&'a self, range: Range<usize>) -> &'a BitSlice {
-        &self[range]
-    }
-    fn view_mut<'a>(&'a mut self, range: Range<usize>) -> &'a mut BitSlice {
-        &mut self[range]
-    }
-    fn new_data() -> Self {
-        Self::new()
-    }
-}
-
-// Slice impl
-// ------------------------------------------------------
-impl<'s> DataSlice<bool> for &'s BitSlice {
-    fn get_data<'a>(&'a self, index: usize) -> &'a bool {
-        &self[index]
-    }
-}
-impl<'a> DataSliceMut<bool> for &'a mut BitSlice {
-    fn set_data(&mut self, index: usize, value: bool) {
-        self.set(index, value);
-    }
-}
-impl<'s> DataSlice<bool> for &'s mut BitSlice {
-    fn get_data<'a>(&'a self, index: usize) -> &'a bool {
-        &self[index]
-    }
-}
-
-// ============================================================================
-//                                    Bimap
-// ============================================================================
-impl<T: Any + Hash + Eq> DataAny for IndexSet<T> {
-    fn inner_type(&self) -> TypeId {
-        TypeId::of::<T>()
-    }
-    fn reserve(&mut self, additional: usize) {
-        self.reserve(additional);
-    }
-}
-impl<T: Any + Hash + Eq> DataSpecific for IndexSet<T> {
-    type Inner = T;
-    type View<'a> = &'a IndexSet<T>;
-    type ViewMut<'a> = BiMapSliceMut<'a, T>;
-
-    fn view<'a>(&'a self, range: Range<usize>) -> Self::View<'a> {
-        BiMapSlice {
-            inner: self,
-            start: range.start,
-            len: range.len(),
-        }
-    }
-    fn view_mut<'a>(&'a mut self, range: Range<usize>) -> Self::ViewMut<'a> {
-        BiMapSliceMut {
-            inner: self,
-            start: range.start,
-            len: range.len(),
-        }
-    }
-    fn new_data() -> Self {
-        Self::new()
-    }
-}
-// Slice struct
-// ------------------------------------------------------
-
-// Slice impl
-// ------------------------------------------------------
-impl<'s, T: Any + Hash + Eq> DataSlice<T> for BiMapSlice<'s, T> {
-    fn get_data<'a>(&'a self, index: usize) -> &'a T {
-        &self.inner.vec[index]
-    }
-}
-impl<'s, T: Any + Hash + Eq> DataSliceMut<T> for BiMapSliceMut<'s, T> {
-    fn set_data(&mut self, index: usize, value: T) {
-        self.set(value);
-    }
-}
-impl<'s, T: Any + Hash + Eq> DataSlice<T> for BiMapSliceMut<'s, T> {
-    fn get_data<'a>(&'a self, index: usize) -> &'a T {
-        &self.inner.vec[index]
-    }
-}
-
-// ============================================================================
 
 pub type ComponentId = u64;
-pub type New<T> = fn(&Data, &mut dyn DataSliceMut<T>);
+pub type New<T> = fn(&Data, &mut dyn DataSlice<T>);
 
+#[derive(Debug)]
 pub struct Component {
     pub(crate) name: &'static str,
     pub(crate) inner_type: TypeId,
@@ -308,6 +169,28 @@ impl Data {
             value.reserve(additional);
         }
         self.cap += additional;
+    }
+    pub(crate) fn validate_range(
+        &self,
+        range: impl RangeBounds<usize>,
+    ) -> Option<ValidRange<'static>> {
+        let start = match range.start_bound() {
+            std::ops::Bound::Included(i) => *i,
+            std::ops::Bound::Excluded(i) => *i + 1,
+            std::ops::Bound::Unbounded => 0,
+        };
+        let end = match range.start_bound() {
+            std::ops::Bound::Included(i) => *i + 1,
+            std::ops::Bound::Excluded(i) => *i,
+            std::ops::Bound::Unbounded => self.len,
+        };
+        if end > self.len || start > end {
+            return None;
+        }
+        Some(ValidRange {
+            inner: Range { start, end },
+            _marker: std::marker::PhantomData,
+        })
     }
     pub fn get<'a>(&'a self, id: &ComponentId) -> Option<&'a DataBox> {
         self.data.get(id)

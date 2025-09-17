@@ -4,17 +4,12 @@
 #![feature(slice_ptr_get)]
 #![feature(const_trait_impl)]
 #![feature(const_cmp)]
+#![feature(ptr_as_ref_unchecked)]
 #![allow(refining_impl_trait)]
 
-mod data;
-mod func;
-mod group;
-mod resource;
+pub mod data;
+pub mod func;
+pub mod group;
+pub mod resource;
 
-pub use data::{
-    Component, ComponentId, Data, DataAny, DataBox, DataGeneric, DataSliceMut, DataRef, DataSpecific,
-};
-pub use func::{Impl, FuncId, Func, Implr, ImplError};
-pub use group::Group;
-pub use resource::Resource;
 // pub type Data<K> = slotmap::SlotMap<K, Group>;

@@ -113,13 +113,6 @@ pub trait DataSpecific: DataAny {
     fn new_data() -> Self;
 }
 
-pub trait DataSpecificAsync: DataAny {
-    type Inner: Any;
-    type Slice: DataSlice<Self::Inner>;
-
-    fn slice_ref_async(&self) -> &dyn Future<Output = &Self::Slice>;
-}
-
 pub trait DataSlice<T: Any>: Any {
     fn get_data<'a>(&'a self, index: ValidIndex<'a>) -> &'a T;
     fn set_data<'a>(&'a mut self, index: ValidIndex<'a>, value: T);

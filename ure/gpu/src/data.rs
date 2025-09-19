@@ -1,7 +1,7 @@
-use std::{any::TypeId, marker::PhantomData};
+use std::{any::TypeId, marker::PhantomData, ops::{Deref, DerefMut}};
 
 use bytemuck::Pod;
-use ure_data::{DataAny, DataGeneric, DataMut, DataRef, DataTyped};
+use ure_data::data::{vec::UnboundSlice, DataAny, DataSpecific};
 use wgpu::{Buffer, BufferDescriptor, BufferSlice, BufferUsages, BufferView, BufferViewMut};
 
 use crate::GPU;
@@ -41,8 +41,21 @@ impl<T: Pod> BufferTyped<T> {
     pub fn initialized<'a>(&'a self) -> BufferSlice<'a> {
         self.inner.slice(..Self::size_with(self.len))
     }
+    pub fn view<'a>(&'a self) -> BufferViewTyped<'a, T> {
+        BufferViewTyped {
+            view: self.initialized().get_mapped_range(),
+            _marker: Default::default()
+        }
+    }
+    pub fn view_mut<'a>(&'a mut self) -> BufferViewMutTyped<'a, T> {
+        BufferViewMutTyped {
+            view: self.initialized().get_mapped_range_mut(),
+            _marker: Default::default()
+        }
+    }
 }
-impl<T: Sized + 'static + Pod> DataAny for BufferTyped<T> {
+
+impl<T: Pod> DataAny for BufferTyped<T> {
     fn inner_type(&self) -> std::any::TypeId {
         TypeId::of::<T>()
     }
@@ -56,6 +69,7 @@ impl<T: Sized + 'static + Pod> DataAny for BufferTyped<T> {
             mapped_at_creation: true,
         });
         {
+            self.inner.map_async(mode, bounds, callback);
             let old_view = self.inner.get_mapped_range(..);
             let mut new_view = new_buffer.get_mapped_range_mut(..);
             let old_slice: &[T] = bytemuck::cast_slice(&old_view);
@@ -67,62 +81,50 @@ impl<T: Sized + 'static + Pod> DataAny for BufferTyped<T> {
         self.inner = new_buffer;
     }
 }
-impl<T: Pod> DataTyped<T> for BufferTyped<T> {
-    type View<'a> = BufferViewTyped<'a, T>;
-    type ViewMut<'a> = BufferViewMutTyped<'a, T>;
+impl<T: Pod> DataSpecific for BufferTyped<T> {
+    type Inner = T;
+    type Slice = UnboundSlice<T>;
 
-    fn view<'a>(&'a self) -> Self::View<'a> {
-        BufferViewTyped {
-            inner: self.initialized().get_mapped_range(),
-            _marker: Default::default(),
-        }
+    fn slice_ref<'a: 'b, 'b>(&'a self) -> (ure_data::data::Mooring<'a>, &'b Self::Slice) {
+        let view = self.view();
+        (Some(Box::new(view)), UnboundSlice::from_slice(&view))
     }
-    fn view_mut<'a>(&'a mut self) -> Self::ViewMut<'a> {
-        BufferViewMutTyped {
-            inner: self.initialized().get_mapped_range_mut(),
-            _marker: Default::default(),
-        }
+    fn slice_mut<'a: 'b, 'b>(&'a mut self) -> (ure_data::data::Mooring<'a>, &'b mut Self::Slice) {
+        todo!()
+    }
+    fn new_data() -> Self {
+        todo!()
     }
 }
 
-pub struct BufferViewTyped<'a, T: Pod> {
-    inner: BufferView<'a>,
+// Slice
+// ================================================================
+#[repr(transparent)]
+pub struct BufferViewTyped<'a, T> {
+    view: BufferView<'a>,
     _marker: PhantomData<T>,
 }
-impl<'a, T: Pod> BufferViewTyped<'a, T> {
-    pub fn get(&'a self, index: usize) -> Option<&'a T> {
-        bytemuck::cast_slice(&self.inner).get(index)
-    }
-}
-impl<'a, T: Pod> AsRef<[T]> for BufferViewTyped<'a, T> {
-    fn as_ref(&self) -> &[T] {
-        bytemuck::cast_slice(&self.inner)
-    }
-}
-impl<'a, T: Pod> DataRef<'a, T> for BufferViewTyped<'a, T> {
-    fn read(&'a self, index: usize) -> Option<&'a T> {
-        self.get(index)
-    }
-}
+impl<'a, T: Pod> Deref for BufferViewTyped<'a, T> {
+    type Target = [T];
 
+    fn deref(&self) -> &Self::Target {
+        bytemuck::cast_slice(&self.view)
+    }
+}
+#[repr(transparent)]
 pub struct BufferViewMutTyped<'a, T> {
-    inner: BufferViewMut<'a>,
+    view: BufferViewMut<'a>,
     _marker: PhantomData<T>,
 }
-impl<'a, T: Pod> BufferViewMutTyped<'a, T> {
-    pub fn get_mut(&'a mut self, index: usize) -> Option<&'a mut T> {
-        bytemuck::cast_slice_mut(&mut self.inner).get_mut(index)
+impl<'a, T: Pod> Deref for BufferViewMutTyped<'a, T> {
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        bytemuck::cast_slice(&self.view)
     }
 }
-impl<'a, T: Pod> AsMut<[T]> for BufferViewMutTyped<'a, T> {
-    fn as_mut(&mut self) -> &mut [T] {
-        bytemuck::cast_slice_mut(&mut self.inner)
-    }
-}
-impl<'a, T: Pod> DataMut<'a, T> for BufferViewMutTyped<'a, T> {
-    fn write(&'a mut self, index: usize, value: T) {
-        if let Some(i) = self.get_mut(index) {
-            *i = value;
-        }
+impl<'a, T: Pod> DerefMut for BufferViewMutTyped<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        bytemuck::cast_slice_mut(&mut self.view)
     }
 }

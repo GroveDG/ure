@@ -11,6 +11,7 @@ pub use index::{ValidIndex, ValidRange};
 // Containers
 pub mod bimap;
 pub mod bitvec;
+pub mod shared;
 pub mod vec;
 
 type GenericVtable = NonNull<()>;

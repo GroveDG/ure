@@ -8,7 +8,7 @@ use bitvec::{
     vec::BitVec,
 };
 
-use crate::data::{DataAny, DataSlice, DataSpecific, Mooring, ValidIndex};
+use crate::data::{DataAny, DataSlice, DataSpecific, ValidIndex};
 
 impl DataAny for BitVec {
     fn inner_type(&self) -> TypeId {
@@ -22,11 +22,11 @@ impl DataSpecific for BitVec {
     type Inner = bool;
     type Slice = UnboundBitSlice;
 
-    fn slice_ref<'a: 'b, 'b>(&'a self) -> (Mooring<'a>, &'b Self::Slice) {
-        (None, UnboundBitSlice::from_slice(self))
+    fn slice_ref(&self) -> &Self::Slice {
+        UnboundBitSlice::from_slice(self)
     }
-    fn slice_mut<'a: 'b, 'b>(&'a mut self) -> (Mooring<'a>, &'b mut Self::Slice) {
-        (None, UnboundBitSlice::from_slice_mut(self))
+    fn slice_mut(&mut self) -> &mut Self::Slice {
+        UnboundBitSlice::from_slice_mut(self)
     }
     fn new_data() -> Self {
         Self::new()

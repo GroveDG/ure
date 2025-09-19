@@ -22,7 +22,7 @@ pub struct DataBox {
 }
 
 impl DataBox {
-    pub fn slice_ref<'a: 'b, 'b, T: Any>(&'a self) -> Option<(Mooring<'a>, &'b dyn DataSlice<T>)> {
+    pub fn slice_ref<T: Any>(&self) -> Option<&dyn DataSlice<T>> {
         if self.inner_type() != TypeId::of::<T>() {
             return None;
         }
@@ -36,9 +36,7 @@ impl DataBox {
         };
         Some(typed.generic())
     }
-    pub fn slice_mut<'a: 'b, 'b, T: Any>(
-        &'a mut self,
-    ) -> Option<(Mooring<'a>, &'b mut dyn DataSlice<T>)> {
+    pub fn slice_mut<T: Any>(&mut self) -> Option<&mut dyn DataSlice<T>> {
         if self.inner_type() != TypeId::of::<T>() {
             return None;
         }
@@ -52,15 +50,11 @@ impl DataBox {
         };
         Some(typed.generic_mut())
     }
-    pub fn downcast_ref<'a: 'b, 'b, D: DataSpecific<Inner = T>, T: Any>(
-        &'a self,
-    ) -> Option<(Mooring<'a>, &'b D::Slice)> {
+    pub fn downcast_ref<D: DataSpecific<Inner = T>, T: Any>(&self) -> Option<&D::Slice> {
         let any: &dyn Any = self.any.as_ref();
         Some(any.downcast_ref::<D>()?.slice_ref())
     }
-    pub fn downcast_mut<'a: 'b, 'b, D: DataSpecific<Inner = T>, T: Any>(
-        &'a mut self,
-    ) -> Option<(Mooring<'a>, &'b mut D::Slice)> {
+    pub fn downcast_mut<D: DataSpecific<Inner = T>, T: Any>(&mut self) -> Option<&mut D::Slice> {
         let any: &mut dyn Any = self.any.as_mut();
         Some(any.downcast_mut::<D>()?.slice_mut())
     }
@@ -97,30 +91,33 @@ impl dyn DataAny {
     }
 }
 
-pub type Mooring<'a> = Option<Box<dyn Drop + 'a>>;
+pub trait DataGeneric<T: Any>: DataAny {
+    fn generic(&self) -> &dyn DataSlice<T>;
+    fn generic_mut(&mut self) -> &mut dyn DataSlice<T>;
+}
+impl<T: Any, S: DataSpecific<Inner = T> + DataAny> DataGeneric<T> for S {
+    fn generic(&self) -> &dyn DataSlice<T> {
+        self.slice_ref()
+    }
+    fn generic_mut(&mut self) -> &mut dyn DataSlice<T> {
+        self.slice_mut()
+    }
+}
 
 pub trait DataSpecific: DataAny {
     type Inner: Any;
     type Slice: DataSlice<Self::Inner>;
 
-    fn slice_ref<'a: 'b, 'b>(&'a self) -> (Mooring<'a>, &'b Self::Slice);
-    fn slice_mut<'a: 'b, 'b>(&'a mut self) -> (Mooring<'a>, &'b mut Self::Slice);
+    fn slice_ref(&self) -> &Self::Slice;
+    fn slice_mut(&mut self) -> &mut Self::Slice;
     fn new_data() -> Self;
 }
 
-pub trait DataGeneric<T: Any>: DataAny {
-    fn generic<'a: 'b, 'b>(&'a self) -> (Mooring<'a>, &'b dyn DataSlice<T>);
-    fn generic_mut<'a: 'b, 'b>(&'a mut self) -> (Mooring<'a>, &'b mut dyn DataSlice<T>);
-}
-impl<T: Any, S: DataSpecific<Inner = T> + DataAny> DataGeneric<T> for S {
-    fn generic<'a: 'b, 'b>(&'a self) -> (Mooring<'a>, &'b dyn DataSlice<T>) {
-        let (mooring, slice) = self.slice_ref();
-        (mooring, slice)
-    }
-    fn generic_mut<'a: 'b, 'b>(&'a mut self) -> (Mooring<'a>, &'b mut dyn DataSlice<T>) {
-        let (mooring, slice) = self.slice_mut();
-        (mooring, slice)
-    }
+pub trait DataSpecificAsync: DataAny {
+    type Inner: Any;
+    type Slice: DataSlice<Self::Inner>;
+
+    fn slice_ref_async(&self) -> &dyn Future<Output = &Self::Slice>;
 }
 
 pub trait DataSlice<T: Any>: Any {

@@ -17,12 +17,12 @@ impl<T: Any> DataSpecific for Shared<T> {
     type Inner = T;
     type Slice = Self;
 
-    fn slice_ref<'a: 'b, 'b>(&'a self) -> (super::Mooring<'a>, &'b Self::Slice) {
-        (None, self)
+    fn slice_ref(&self) -> &Self::Slice {
+        self
     }
 
-    fn slice_mut<'a: 'b, 'b>(&'a mut self) -> (super::Mooring<'a>, &'b mut Self::Slice) {
-        (None, self)
+    fn slice_mut(&mut self) -> &mut Self::Slice {
+        self
     }
 
     fn new_data() -> Self {

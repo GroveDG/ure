@@ -1,206 +1,72 @@
-use std::{
-    any::{Any, TypeId},
-    collections::HashMap,
-    ops::{Deref, DerefMut, Range, RangeBounds},
-    ptr::NonNull,
-};
+use std::{any::Any, collections::HashMap, hash::Hash};
 
-mod index;
-pub use index::{ValidIndex, ValidRange};
+use const_fnv1a_hash::fnv1a_hash_str_64;
+use nohash_hasher::BuildNoHashHasher;
 
-// Containers
 pub mod bimap;
 pub mod bitvec;
-pub mod shared;
+pub mod single;
 pub mod vec;
 
-type GenericVtable = NonNull<()>;
-
-pub struct DataBox {
-    any: Box<dyn DataAny>,
-    generic: GenericVtable,
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ComponentId {
+    inner: u64,
 }
-
-impl DataBox {
-    pub fn slice_ref<T: Any>(&self) -> Option<&dyn DataSlice<T>> {
-        if self.inner_type() != TypeId::of::<T>() {
-            return None;
-        }
-        let ptr = self.any.as_ref() as *const dyn DataAny;
-        let typed: &dyn DataGeneric<T> = unsafe {
-            std::ptr::from_raw_parts::<dyn DataGeneric<T>>(
-                ptr as *const (),
-                std::mem::transmute(self.generic),
-            )
-            .as_ref()?
-        };
-        Some(typed.generic())
-    }
-    pub fn slice_mut<T: Any>(&mut self) -> Option<&mut dyn DataSlice<T>> {
-        if self.inner_type() != TypeId::of::<T>() {
-            return None;
-        }
-        let ptr = self.any.as_mut() as *mut dyn DataAny;
-        let typed: &mut dyn DataGeneric<T> = unsafe {
-            std::ptr::from_raw_parts_mut::<dyn DataGeneric<T>>(
-                ptr as *mut (),
-                std::mem::transmute(self.generic),
-            )
-            .as_mut()?
-        };
-        Some(typed.generic_mut())
-    }
-    pub fn downcast_ref<D: DataSpecific<Inner = T>, T: Any>(&self) -> Option<&D::Slice> {
-        let any: &dyn Any = self.any.as_ref();
-        Some(any.downcast_ref::<D>()?.slice_ref())
-    }
-    pub fn downcast_mut<D: DataSpecific<Inner = T>, T: Any>(&mut self) -> Option<&mut D::Slice> {
-        let any: &mut dyn Any = self.any.as_mut();
-        Some(any.downcast_mut::<D>()?.slice_mut())
+impl Hash for ComponentId {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_u64(self.inner);
     }
 }
-impl Deref for DataBox {
-    type Target = dyn DataAny;
+impl nohash_hasher::IsEnabled for ComponentId {}
 
-    fn deref(&self) -> &Self::Target {
-        self.any.as_ref()
-    }
-}
-impl DerefMut for DataBox {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.any.as_mut()
-    }
-}
-
-pub trait DataAny: Any {
-    fn inner_type(&self) -> TypeId;
-    fn reserve(&mut self, additional: usize);
-}
-impl dyn DataAny {
-    pub fn is<D: DataGeneric<T>, T: Any>(&self) -> bool {
-        (self as &dyn Any).is::<D>()
-    }
-    pub fn inner_is<T: Any>(&self) -> bool {
-        self.inner_type() == TypeId::of::<T>()
-    }
-    pub fn downcast_ref<T: Any, D: DataSpecific<Inner = T>>(&self) -> Option<&D> {
-        (self as &dyn Any).downcast_ref()
-    }
-    pub fn downcast_mut<T: Any, D: DataSpecific<Inner = T>>(&mut self) -> Option<&mut D> {
-        (self as &mut dyn Any).downcast_mut()
-    }
-}
-
-pub trait DataGeneric<T: Any>: DataAny {
-    fn generic(&self) -> &dyn DataSlice<T>;
-    fn generic_mut(&mut self) -> &mut dyn DataSlice<T>;
-}
-impl<T: Any, S: DataSpecific<Inner = T> + DataAny> DataGeneric<T> for S {
-    fn generic(&self) -> &dyn DataSlice<T> {
-        self.slice_ref()
-    }
-    fn generic_mut(&mut self) -> &mut dyn DataSlice<T> {
-        self.slice_mut()
-    }
-}
-
-pub trait DataSpecific: DataAny {
-    type Inner: Any;
-    type Slice: DataSlice<Self::Inner>;
-
-    fn slice_ref(&self) -> &Self::Slice;
-    fn slice_mut(&mut self) -> &mut Self::Slice;
-    fn new_data() -> Self;
-}
-
-pub trait DataSlice<T: Any>: Any {
-    fn get_data<'a>(&'a self, index: ValidIndex<'a>) -> &'a T;
-    fn set_data<'a>(&'a mut self, index: ValidIndex<'a>, value: T);
-}
-
-impl<T> dyn DataSlice<T> {
-    pub fn downcast_ref<D: DataSpecific<Inner = T>>(&self) -> Option<&D::Slice> {
-        (self as &dyn Any).downcast_ref()
-    }
-    pub fn downcast_mut<D: DataSpecific<Inner = T>>(&mut self) -> Option<&mut D::Slice> {
-        (self as &mut dyn Any).downcast_mut()
-    }
-}
-
-pub type ComponentId = u64;
-pub type New<T> = fn(&Data, &mut dyn DataSlice<T>);
-
-#[derive(Debug)]
 pub struct Component {
-    pub(crate) name: &'static str,
-    pub(crate) inner_type: TypeId,
-    pub(crate) id: ComponentId,
+    id: ComponentId,
 }
 impl Component {
-    pub const fn new<T: Any>(name: &'static str) -> Self {
+    pub const fn new(name: &'static str) -> Self {
         Self {
-            name,
-            inner_type: TypeId::of::<T>(),
-            id: const_fnv1a_hash::fnv1a_hash_str_64(name),
+            id: ComponentId {
+                inner: fnv1a_hash_str_64(name),
+            },
         }
+    }
+    pub const fn id(&self) -> ComponentId {
+        self.id
+    }
+}
+
+pub trait Container: Any {
+    fn swap_delete(&mut self, indices: &[usize]);
+    fn new(&mut self, num: usize);
+}
+
+impl dyn Container {
+    pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
+    }
+    pub fn downcast_mut<T: Any>(&mut self) -> Option<&mut T> {
+        (self as &mut dyn Any).downcast_mut()
     }
 }
 
 #[derive(Default)]
-pub struct Data {
-    data: HashMap<ComponentId, DataBox>,
-    len: usize,
-    cap: usize,
+pub struct Components {
+    data: HashMap<ComponentId, Box<dyn Container>, BuildNoHashHasher<ComponentId>>,
 }
-impl Data {
-    pub(crate) fn insert<T: Any>(&mut self, id: ComponentId, data: Box<dyn DataGeneric<T>>) {
-        let ptr = data.as_ref() as *const dyn DataGeneric<T>;
-        let typed = unsafe { std::mem::transmute(std::ptr::metadata(ptr)) };
-        let any: Box<dyn DataAny> = data;
-        let boxed = DataBox {
-            any,
-            generic: typed,
-        };
-        self.data.insert(id, boxed);
+impl Components {
+    pub fn get(&self, component: &'static ComponentId) -> Option<&dyn Container> {
+        Some(self.data.get(component)?.as_ref())
     }
-    pub(crate) fn reserve(&mut self, additional: usize) {
-        for value in self.data.values_mut() {
-            value.reserve(additional);
-        }
-        self.cap += additional;
+    pub fn get_mut(&mut self, component: &'static ComponentId) -> Option<&mut dyn Container> {
+        Some(self.data.get_mut(component)?.as_mut())
     }
-    pub(crate) fn validate_range(
-        &self,
-        range: impl RangeBounds<usize>,
-    ) -> Option<ValidRange<'static>> {
-        let start = match range.start_bound() {
-            std::ops::Bound::Included(i) => *i,
-            std::ops::Bound::Excluded(i) => *i + 1,
-            std::ops::Bound::Unbounded => 0,
-        };
-        let end = match range.start_bound() {
-            std::ops::Bound::Included(i) => *i + 1,
-            std::ops::Bound::Excluded(i) => *i,
-            std::ops::Bound::Unbounded => self.len,
-        };
-        if end > self.len || start > end {
-            return None;
-        }
-        Some(ValidRange {
-            inner: Range { start, end },
-            _marker: std::marker::PhantomData,
-        })
-    }
-    pub fn get(&self, id: &ComponentId) -> Option<&DataBox> {
-        self.data.get(id)
-    }
-    pub fn get_mut(&mut self, id: &ComponentId) -> Option<&mut DataBox> {
-        self.data.get_mut(id)
-    }
-    pub fn get_mut_disjoint<const N: usize>(
+    pub fn get_disjoint_mut<const N: usize>(
         &mut self,
-        ids: [&ComponentId; N],
-    ) -> [Option<&mut DataBox>; N] {
-        self.data.get_disjoint_mut(ids)
+        components: [&'static ComponentId; N],
+    ) -> [Option<&mut dyn Container>; N] {
+        self.data
+            .get_disjoint_mut(components)
+            .map(|v| Some(v?.as_mut()))
     }
 }

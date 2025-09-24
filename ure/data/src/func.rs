@@ -1,80 +1,97 @@
-use std::{any::Any, collections::HashMap};
+use std::{
+    any::{Any, TypeId},
+    marker::PhantomData,
+};
 
-use crate::data::{Component, Components, Container};
+use crate::data::{ComponentId, Components, Container};
 
-pub trait Interface<'a> {
-    fn of(components: &'a mut Components) -> impl Iterator<Item = &'a mut dyn Container>;
-    fn implement(components: &Components) -> Option<Intr<'a, Self>>;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ConstantId {
+    inner: u64,
+}
+pub struct Constant<T: Any> {
+    id: ConstantId,
+    _marker: PhantomData<T>,
 }
 
-pub const INDEX_EX: Component = Component::new("Index");
-
-pub trait InterfaceExample {
-    fn call(&mut self);
+pub struct Function<T: Any> {
+    inner: Constant<T>,
 }
 
-pub type Intr<'a, S> = fn(&'a mut Components) -> Box<S>;
-
-macro_rules! interface {
-    {
-        $trait:ident
-        [Component; $num:literal] = [$($comp:expr),* $(,)?];
-        $(
-            $impl_vis:vis $impl_name:ident ($($field:ident : $comp_ty:ty),* $(,)?);
-        )*
-    } => {
-
-$(
-    $impl_vis struct $impl_name<'a> {$(
-        $field: &'a mut $comp_ty
-    ),*}
-    impl<'a> $impl_name<'a> {
-        fn new(components: &'a mut Components) -> Box<dyn $trait + 'a> {
-            let mut components = <dyn $trait>::of(components);
-            Box::new(Self {$(
-                $field: components.next().unwrap().downcast_mut().unwrap(),
-            ),*})
+pub struct Impl<Func> {
+    pub component_types: &'static [fn() -> TypeId],
+    pub implementation: Func,
+}
+pub struct Func<F: 'static> {
+    components: &'static [ComponentId],
+    impls: &'static [Impl<F>],
+}
+impl<F: Copy> Func<F> {
+    pub fn implement(&self, data: &Components) -> Option<F> {
+        let mut components = Vec::with_capacity(self.components.len());
+        for component in self.components {
+            components.push(data.get(component)?.type_id());
         }
-    }
-)*
-
-#[allow(unused)]
-const COMPONENTS: [&'static $crate::data::Component; $num] = [&$($comp),*];
-const COMPONENT_IDS: [&'static $crate::data::ComponentId; $num] = [$(&$comp.id()),*];
-
-impl<'a> $crate::func::Interface<'a> for dyn $trait + 'a {
-    fn of(components: &'a mut $crate::data::Components) -> impl Iterator<Item = &'a mut dyn $crate::data::Container> {
-        components
-            .get_disjoint_mut(COMPONENT_IDS)
-            .map(|c| c.unwrap())
-            .into_iter()
-    }
-    fn implement(components: &Components) -> Option<Intr<'a, Self>> {
-        let components = COMPONENT_IDS.map(|c| components.get(c).unwrap());
-        $({
-            let mut components = components.into_iter();
-            let mut should_impl = true;
-            $(
-                should_impl &= (components.next().unwrap() as &dyn Any).is::<$comp_ty>();
-            )*
-            if should_impl {
-                return Some(<$impl_name>::new)
+        for i in self.impls {
+            let i_c = i.component_types.iter().map(|f| (f)());
+            if components.iter().copied().eq(i_c) {
+                return Some(i.implementation);
             }
-        })*
+        }
         None
     }
 }
 
+const A: ComponentId = ComponentId::new("example");
+const B: ComponentId = ComponentId::new("example");
+
+const EXAMPLE: Func<fn(&mut dyn Container, &dyn Container, bool) -> f32> = Func {
+    components: &[A, B],
+    impls: &[Impl {
+        component_types: &[TypeId::of::<Vec<usize>>, TypeId::of::<Vec<usize>>],
+        implementation: |a, b, c| {
+            (|a: &mut Vec<usize>, b: &Vec<usize>, c: bool| -> f32 { 0.0 })(
+                a.downcast_mut().unwrap(),
+                b.downcast_ref().unwrap(),
+                c,
+            )
+        },
+    }],
+};
+
+/*
+(...) (-> T)? [...]
+|...| [...]
+*/
+
+#[macro_export]
+macro_rules! func {
+    (
+        ($($f_ty:ty $(: $comp_id:expr)?),* $(,)?) $(-> $fr_ty:ty)?;
+        $(
+            ($($(as mut $comp_mut_ty:ty)? $(as ref $comp_ref_ty:ty)? $(as $arg_ty:ty)?),* $(,)?) $i:expr;
+        )*
+    ) => {
+const EXAMPLES: $crate::func::Func<fn ($($f_ty),*) $(-> $fr_ty)?> = $crate::func::Func {
+    components: &[$($($comp_id,)?)*],
+    impls: &[$crate::mident::mident!($(
+        $crate::func!(IMPL ($(#rand : $(as mut $comp_mut_ty)? $(as ref $comp_ref_ty)? $(as $arg_ty)?),*) $i)
+    ),*)]
+};
+    };
+    (IMPL ($($arg_name:ident : $(as mut $comp_mut_ty:ty)? $(as ref $comp_ref_ty:ty)? $(as $arg_ty:ty)?),* $(,)?) $i:expr) => {
+Impl {
+    component_types: &[$($(TypeId::of::<$comp_mut_ty>,)? $(TypeId::of::<$comp_ref_ty>,)?)*],
+    implementation: |$($arg_name),*| ($i as fn($($(&mut $comp_mut_ty)? $(&$comp_ref_ty)? $($arg_ty)?),*))($(
+        $arg_name $(.downcast_mut::<$comp_mut_ty>().unwrap())? $(.downcast_ref::<$comp_ref_ty>().unwrap())?
+    ),*),
+}
     };
 }
 
-interface! {
-    InterfaceExample
-    [Component; 1] = [INDEX_EX];
-    VecImpl (indices: Vec<usize>);
-}
-impl InterfaceExample for VecImpl<'_> {
-    fn call(&mut self) {
-        self.indices[0];
-    }
+func!{
+    (&mut dyn Container: A, bool);
+    (as mut Vec<usize>, as bool) |a, b| {
+        a.reverse();
+    };
 }

@@ -13,28 +13,19 @@ pub mod vec;
 pub struct ComponentId {
     inner: u64,
 }
+impl ComponentId {
+    pub const fn new(name: &'static str) -> Self {
+        Self {
+            inner: fnv1a_hash_str_64(name),
+        }
+    }
+}
 impl Hash for ComponentId {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         state.write_u64(self.inner);
     }
 }
 impl nohash_hasher::IsEnabled for ComponentId {}
-
-pub struct Component {
-    id: ComponentId,
-}
-impl Component {
-    pub const fn new(name: &'static str) -> Self {
-        Self {
-            id: ComponentId {
-                inner: fnv1a_hash_str_64(name),
-            },
-        }
-    }
-    pub const fn id(&self) -> ComponentId {
-        self.id
-    }
-}
 
 pub trait Container: Any {
     fn swap_delete(&mut self, indices: &[usize]);

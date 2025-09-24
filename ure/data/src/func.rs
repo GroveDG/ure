@@ -45,34 +45,30 @@ impl<F: Copy> Func<F> {
 const A: ComponentId = ComponentId::new("example");
 const B: ComponentId = ComponentId::new("example");
 
-const EXAMPLE: Func<fn(&mut dyn Container, &dyn Container, bool) -> f32> = Func {
-    components: &[A, B],
-    impls: &[Impl {
-        component_types: &[TypeId::of::<Vec<usize>>, TypeId::of::<Vec<usize>>],
-        implementation: |a, b, c| {
-            (|a: &mut Vec<usize>, b: &Vec<usize>, c: bool| -> f32 { 0.0 })(
-                a.downcast_mut().unwrap(),
-                b.downcast_ref().unwrap(),
-                c,
-            )
-        },
-    }],
-};
-
-/*
-(...) (-> T)? [...]
-|...| [...]
-*/
+// const EXAMPLE: Func<fn(&mut dyn Container, &dyn Container, bool) -> f32> = Func {
+//     components: &[A, B],
+//     impls: &[Impl {
+//         component_types: &[TypeId::of::<Vec<usize>>, TypeId::of::<Vec<usize>>],
+//         implementation: |a, b, c| {
+//             (|a: &mut Vec<usize>, b: &Vec<usize>, c: bool| -> f32 { 0.0 })(
+//                 a.downcast_mut().unwrap(),
+//                 b.downcast_ref().unwrap(),
+//                 c,
+//             )
+//         },
+//     }],
+// };
 
 #[macro_export]
 macro_rules! func {
     (
-        ($($f_ty:ty $(: $comp_id:expr)?),* $(,)?) $(-> $fr_ty:ty)?;
+        $func_vis:vis $func_name:ident :
+        ($($f_ty:ty $(: $comp_id:expr)?),* $(,)?) $(-> $fr_ty:ty)? =
         $(
             ($($(as mut $comp_mut_ty:ty)? $(as ref $comp_ref_ty:ty)? $(as $arg_ty:ty)?),* $(,)?) $i:expr;
         )*
     ) => {
-const EXAMPLES: $crate::func::Func<fn ($($f_ty),*) $(-> $fr_ty)?> = $crate::func::Func {
+$func_vis const $func_name: $crate::func::Func<fn ($($f_ty),*) $(-> $fr_ty)?> = $crate::func::Func {
     components: &[$($($comp_id,)?)*],
     impls: &[$crate::mident::mident!($(
         $crate::func!(IMPL ($(#rand : $(as mut $comp_mut_ty)? $(as ref $comp_ref_ty)? $(as $arg_ty)?),*) $i)
@@ -81,8 +77,8 @@ const EXAMPLES: $crate::func::Func<fn ($($f_ty),*) $(-> $fr_ty)?> = $crate::func
     };
     (IMPL ($($arg_name:ident : $(as mut $comp_mut_ty:ty)? $(as ref $comp_ref_ty:ty)? $(as $arg_ty:ty)?),* $(,)?) $i:expr) => {
 Impl {
-    component_types: &[$($(TypeId::of::<$comp_mut_ty>,)? $(TypeId::of::<$comp_ref_ty>,)?)*],
-    implementation: |$($arg_name),*| ($i as fn($($(&mut $comp_mut_ty)? $(&$comp_ref_ty)? $($arg_ty)?),*))($(
+    component_types: &[$($(std::any::TypeId::of::<$comp_mut_ty>,)? $(std::any::TypeId::of::<$comp_ref_ty>,)?)*],
+    implementation: |$($arg_name),*| ($i as fn($($(&mut $comp_mut_ty)? $(&$comp_ref_ty)? $($arg_ty)?),*) -> _)($(
         $arg_name $(.downcast_mut::<$comp_mut_ty>().unwrap())? $(.downcast_ref::<$comp_ref_ty>().unwrap())?
     ),*),
 }
@@ -90,8 +86,9 @@ Impl {
 }
 
 func!{
-    (&mut dyn Container: A, bool);
+    pub EXAMPLE: (&mut dyn Container: A, bool) -> usize =
     (as mut Vec<usize>, as bool) |a, b| {
         a.reverse();
+        return 0;
     };
 }

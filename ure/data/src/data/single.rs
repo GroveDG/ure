@@ -9,6 +9,5 @@ pub struct Single<T: Any + Default> {
 }
 
 impl<T: Any + Default> Container for Single<T> {
-    fn swap_delete(&mut self, _indices: &[usize]) {}
-    fn new(&mut self, _num: usize) {}
+    fn execute(&mut self, _: &[super::ComponentCommand]) {}
 }

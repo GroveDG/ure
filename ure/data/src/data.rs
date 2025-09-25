@@ -1,4 +1,4 @@
-use std::{any::Any, collections::HashMap, hash::Hash};
+use std::{any::Any, collections::HashMap, hash::Hash, ops::Range};
 
 use const_fnv1a_hash::fnv1a_hash_str_64;
 use nohash_hasher::BuildNoHashHasher;
@@ -28,8 +28,7 @@ impl Hash for ComponentId {
 impl nohash_hasher::IsEnabled for ComponentId {}
 
 pub trait Container: Any {
-    fn swap_delete(&mut self, indices: &[usize]);
-    fn new(&mut self, num: usize);
+    fn execute(&mut self, commands: &[ComponentCommand]);
 }
 
 impl dyn Container {
@@ -39,6 +38,17 @@ impl dyn Container {
     pub fn downcast_mut<T: Any>(&mut self) -> Option<&mut T> {
         (self as &mut dyn Any).downcast_mut()
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum ComponentCommand {
+    /// Creates `num` new elements.
+    New { num: usize },
+    /// Deletes all elements in `range`.
+    /// 
+    /// Deletes are always `swap_remove` with ordering within the swapped chunk preserved.
+    /// To implement this with the `swap_remove` function, reverse the iterator with `range.rev()`.
+    Delete{ range: Range<usize> },
 }
 
 #[derive(Default)]
@@ -59,5 +69,10 @@ impl Components {
         self.data
             .get_disjoint_mut(components)
             .map(|v| Some(v?.as_mut()))
+    }
+    pub fn execute(&mut self, commands: Vec<ComponentCommand>) {
+        for (_, component) in self.data.iter_mut() {
+            component.execute(&commands);
+        }
     }
 }

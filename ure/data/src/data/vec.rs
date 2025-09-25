@@ -1,20 +1,26 @@
 use std::any::Any;
 
-use crate::data::Container;
+use crate::data::{ComponentCommand, Container};
 
 pub struct VecData<T: Any> {
     inner: Vec<T>,
-    f: fn() -> T,
+    f: Box<dyn FnMut() -> T>,
 }
 
 impl<T: Any> Container for VecData<T> {
-    fn swap_delete(&mut self, indices: &[usize]) {
-        for &index in indices {
-            self.inner.swap_remove(index);
+    fn execute(&mut self, commands: &[super::ComponentCommand]) {
+        for command in commands.iter().cloned() {
+            match command {
+                ComponentCommand::New { num } => {
+                    self.inner.resize_with(self.inner.len() + num, self.f.as_mut());
+                },
+                ComponentCommand::Delete { range } => {
+                    for i in range.rev() {
+                        self.inner.swap_remove(i);
+                    }
+                },
+            }
         }
-    }
-    fn new(&mut self, num: usize) {
-        self.inner.resize_with(self.inner.len() + num, &self.f);
     }
 }
 
@@ -22,7 +28,7 @@ impl<T: Any + Default> Default for VecData<T> {
     fn default() -> Self {
         Self {
             inner: Default::default(),
-            f: T::default,
+            f: Box::new(T::default),
         }
     }
 }

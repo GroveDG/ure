@@ -2,19 +2,24 @@ use bitvec::vec::BitVec;
 
 use crate::data::Container;
 
-#[derive(Debug, Default)]
 pub struct BitData {
     inner: BitVec,
-    default: bool,
+    f: Box<dyn FnMut() -> bool>,
 }
 
 impl Container for BitData {
-    fn swap_delete(&mut self, indices: &[usize]) {
-        for &index in indices {
-            self.inner.swap_remove(index);
+    fn execute(&mut self, commands: &[super::ComponentCommand]) {
+        for command in commands.iter().cloned() {
+            match command {
+                super::ComponentCommand::New { num } => self
+                    .inner
+                    .resize_with(self.inner.len() + num, |_| (self.f)()),
+                super::ComponentCommand::Delete { range } => {
+                    for i in range.rev() {
+                        self.inner.swap_remove(i);
+                    }
+                },
+            }
         }
-    }
-    fn new(&mut self, num: usize) {
-        self.inner.resize(self.inner.len() + num, self.default);
     }
 }

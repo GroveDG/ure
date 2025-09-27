@@ -11,7 +11,7 @@ use ure_data::Group;
 use winit::{
     application::ApplicationHandler,
     event_loop::{ActiveEventLoop, EventLoopProxy},
-    window::WindowAttributes,
+    window::{WindowAttributes, WindowId},
 };
 
 pub mod input;
@@ -19,6 +19,12 @@ pub mod input;
 pub type Input = Arc<input::Input>;
 
 pub type Window = Arc<winit::window::Window>;
+
+pub struct Windows {
+    ids: IndexSet<WindowId>,
+    windows: Vec<Window>,
+    surfaces: Vec<Surface>,
+}
 
 #[derive(Debug, Clone)]
 pub enum Event {

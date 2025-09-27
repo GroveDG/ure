@@ -1,0 +1,106 @@
+use std::{any::{Any, TypeId}, collections::HashMap, hash::Hash};
+
+use const_fnv1a_hash::fnv1a_hash_str_64;
+use nohash_hasher::BuildNoHashHasher;
+
+use crate::data::{ComponentId, Components};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FunctionId {
+	inner: u64,
+}
+impl FunctionId {
+	pub const fn new(name: &'static str) -> Self {
+		Self {
+			inner: fnv1a_hash_str_64(name),
+		}
+	}
+}
+impl Hash for FunctionId {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+		state.write_u64(self.inner);
+	}
+}
+impl nohash_hasher::IsEnabled for FunctionId {}
+
+pub struct Impl<Func> {
+	pub component_types: &'static [fn() -> TypeId],
+	pub implementation: Func,
+}
+pub struct Func<F: 'static> {
+	pub(crate) id: FunctionId,
+	pub(crate) components: &'static [ComponentId],
+	pub(crate) impls: &'static [Impl<F>],
+}
+impl<F: Clone> Func<F> {
+	pub fn implement(&self, data: &Components) -> Option<F> {
+		let mut components = Vec::with_capacity(self.components.len());
+		for component in self.components {
+			components.push(data.get(component)?.type_id());
+		}
+		for i in self.impls {
+			let i_c = i.component_types.iter().map(|f| (f)());
+			if components.iter().copied().eq(i_c) {
+				return Some(i.implementation.clone());
+			}
+		}
+		None
+	}
+}
+
+#[derive(Default)]
+pub struct Functions {
+	functions: HashMap<FunctionId, Box<dyn Any>, BuildNoHashHasher<FunctionId>>,
+}
+impl Functions {
+	pub fn implement<F: Any + Clone>(&mut self, func: &'static Func<F>, components: &Components) -> Option<()> {
+		let f = func.implement(components)?;
+		self.functions.insert(func.id, Box::new(f));
+		Some(())
+	}
+	pub fn unimplement(&mut self, id: &FunctionId) {
+		self.functions.remove(id);
+	}
+}
+
+#[macro_export]
+macro_rules! func {
+	(
+		$func_vis:vis $func_name:ident :
+		($($f_ty:ty $(: $comp_id:expr)?),* $(,)?) $(-> $fr_ty:ty)? =
+		$(
+			( $( _ $(as &mut $mut_ty:ty)? $(as &$ref_ty:ty)? ),* $(,)? ) $i:expr
+		),* $(,)?
+	) => {
+$func_vis const $func_name: $crate::func::Func<fn ($($f_ty),*) $(-> $fr_ty)?> = crate::mident::mident!($crate::func::Func {
+	id: $crate::func::FunctionId::new(stringify!(#downcase $func_name)),
+	components: &[$($($comp_id,)?)*],
+	impls: &[$(
+		$crate::func!(IMPL ( $(#rand $(as &mut $mut_ty)? $(as &$ref_ty)?),* ) $i)
+	),*]
+});
+	};
+	(IMPL ( $( $arg_name:ident $(as &mut $mut_ty:ty)? $(as &$ref_ty:ty)? ),* $(,)? ) $i:expr) => {
+$crate::func::Impl {
+	component_types: &[$($(std::any::TypeId::of::<$mut_ty>,)? $(std::any::TypeId::of::<$ref_ty>,)?)*],
+	implementation: |$($arg_name),*| ($i)($(
+		$arg_name $(.downcast_mut::<$mut_ty>().unwrap())? $(.downcast_ref::<$ref_ty>().unwrap())?
+	),*),
+}
+	};
+}
+
+mod example {
+	use crate::data::ComponentId;
+	use std::any::Any;
+
+	const A: ComponentId = ComponentId::new("example_indices");
+
+	func! {
+		pub EXAMPLE: (&mut dyn Any: A, bool) =
+		(_ as &mut Vec<usize>, _) example_vec,
+	}
+
+	fn example_vec(a: &mut Vec<usize>, b: bool) {}
+}
+pub use example::EXAMPLE;

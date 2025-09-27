@@ -90,6 +90,38 @@ $crate::func::Impl {
 	};
 }
 
+#[macro_export]
+macro_rules! method {
+	(
+		$func_vis:vis $func_name:ident :
+		(&mut $mut_comp_id:expr $(, $comp_id:expr)* $(,)?) =
+		$(
+			( $mut_ty:ty $(, $ref_ty:ty)* $(,)? ) $i:expr
+		),* $(,)?
+	) => {
+$func_vis const $func_name: $crate::func::Func<fn (&mut dyn Any, &[&dyn Any])> = $crate::func::Func {
+	id: $crate::func::FunctionId::new(stringify!(#downcase $func_name)),
+	components: &[$mut_comp_id $(, $comp_id)*],
+	impls: &[$(
+		$crate::method!(IMPL ( $mut_ty $(, $ref_ty)* ) $i)
+	),*]
+};
+	};
+	(IMPL ( $mut_ty:ty $(, $ref_ty:ty )* ) $i:expr) => {
+$crate::func::Impl {
+	component_types: &[std::any::TypeId::of::<$mut_ty> $(, std::any::TypeId::of::<$ref_ty>)*],
+	#[allow(unused_variables)]
+	implementation: |mut_arg, args| {
+		let mut args = args.into_iter();
+		($i)(
+			mut_arg.downcast_mut::<$mut_ty>().unwrap()
+			$(, args.next().unwrap().downcast_ref::<$ref_ty>().unwrap())*
+		)
+	},
+}
+	};
+}
+
 mod example {
 	use crate::data::ComponentId;
 	use std::any::Any;
@@ -104,3 +136,19 @@ mod example {
 	fn example_vec(a: &mut Vec<usize>, b: bool) {}
 }
 pub use example::EXAMPLE;
+
+mod example2 {
+	use crate::data::ComponentId;
+	use std::any::Any;
+
+	const A: ComponentId = ComponentId::new("example_indices");
+	const B: ComponentId = ComponentId::new("example_indices");
+	const C: ComponentId = ComponentId::new("example_indices");
+
+	method! {
+		pub EXAMPLE: (&mut A, B, C) =
+		(Vec<usize>, Vec<usize>, Vec<usize>) example_vec,
+	}
+
+	fn example_vec(a: &mut Vec<usize>, b: &Vec<usize>, c: &Vec<usize>) {}
+}

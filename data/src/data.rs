@@ -3,7 +3,7 @@ use std::{any::Any, collections::HashMap, hash::Hash, ops::Range};
 use const_fnv1a_hash::fnv1a_hash_str_64;
 use nohash_hasher::BuildNoHashHasher;
 
-use crate::func::Func;
+use crate::func::{Func, Method};
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,13 +35,13 @@ pub enum ComponentCommand {
 	Delete { range: Range<usize> },
 }
 
-pub struct Component<New: Any, Delete: Any> {
+pub struct Component {
 	pub(crate) id: ComponentId,
-	pub(crate) new: &'static Func<New>,
-	pub(crate) delete: &'static Func<Delete>,
+	pub(crate) new: &'static Func<Method>,
+	pub(crate) delete: &'static Func<Method>,
 }
-impl<New: Any, Delete: Any> Component<New, Delete> {
-	pub const fn new(name: &str, new: &'static Func<New>, delete: &'static Func<Delete>) -> Self {
+impl Component {
+	pub const fn new(name: &str, new: &'static Func<Method>, delete: &'static Func<Method>) -> Self {
 		Self {
 			id: ComponentId::new(name),
 			new,
@@ -72,7 +72,10 @@ impl Components {
 	pub fn add<C: Any>(&mut self, id: ComponentId, component: C) {
 		self.components.insert(id, Box::new(component));
 	}
-	pub fn remove(&mut self, id: &ComponentId) {
-		self.components.remove(id);
+	pub(crate) fn insert(&mut self, id: ComponentId, component: Box<dyn Any>) {
+		self.components.insert(id, component);
+	}
+	pub fn remove(&mut self, id: &ComponentId) -> Option<Box<dyn Any>> {
+		self.components.remove(id)
 	}
 }

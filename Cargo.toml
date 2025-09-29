@@ -19,7 +19,6 @@ slotmap = "1"
 spin_sleep = "1"
 winit = { version = "0", default-features = false, features = ["ahash", "bytemuck", "memmap2", "percent-encoding", "rwh_06", "wayland", "wayland-backend", "wayland-client", "wayland-dlopen", "wayland-protocols", "wayland-protocols-plasma",] }
 ure-data = { path = "data" }
-indexmap = "2.11.4"
 
 [features]
 default = ["2d", "gui"]

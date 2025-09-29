@@ -1,4 +1,4 @@
-use std::{any::Any, cell::RefCell, collections::HashMap, ops::Range};
+use std::{any::Any, collections::HashMap, ops::Range};
 
 use bitvec::{slice::BitSlice, vec::BitVec};
 use indexmap::IndexSet;
@@ -6,12 +6,6 @@ use one_or_many::OneOrMany;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ComponentId(u64);
-impl ComponentId {
-    /// [boost::hash_combine](https://www.boost.org/doc/libs/1_55_0/doc/html/hash/reference.html#boost.hash_combine)
-    const fn combine(self, rhs: Self) -> Self {
-        Self(self.0 ^ rhs.0 + 0x9e3779b9 + (self.0 << 6) + (self.0 >> 2))
-    }
-}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FunctionId(u64);
 
@@ -62,9 +56,6 @@ impl Group {
         self.len
     }
     pub fn add_component<C: Component>(&mut self, init: impl FnOnce(&Self) -> C::Container) {
-        let Some((a, b)) = self.get_components_mut::<(ExampleIndex, ExampleIndex)>() else {
-            panic!()
-        };
         self.components.insert(C::ID, Box::new((init)(self)));
     }
     pub fn get_components<C: ComponentRetrieve>(

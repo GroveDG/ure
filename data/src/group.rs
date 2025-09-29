@@ -112,29 +112,6 @@ impl<C: Component> ComponentRetrieve for C {
         )
     }
 }
-impl<A: Component, B: Component> ComponentRetrieve for (A, B) {
-    type Containers = (A::Container, B::Container);
-
-    fn retrieve(components: &Components) -> Option<<Self::Containers as Container>::Ref<'_>> {
-        let a = components
-            .get(&A::ID)?
-            .downcast_ref::<A::Container>()?
-            .container_ref();
-        let b = components
-            .get(&B::ID)?
-            .downcast_ref::<B::Container>()?
-            .container_ref();
-        Some((a, b))
-    }
-    fn retrieve_mut(
-        components: &mut Components,
-    ) -> Option<<Self::Containers as Container>::Mut<'_>> {
-        let [a, b] = components.get_disjoint_mut([&A::ID, &B::ID]);
-        let a = a?.downcast_mut::<A::Container>()?.container_mut();
-        let b = b?.downcast_mut::<B::Container>()?.container_mut();
-        Some((a, b))
-    }
-}
 
 impl<T: 'static> Container for Vec<T> {
     type Ref<'a> = &'a [T];
@@ -182,14 +159,53 @@ impl Container for BitVec {
 }
 // GPU Buffer container defined in the URE GPU crate.
 
-impl<A: Container, B: Container> Container for (A, B) {
-    type Ref<'a> = (A::Ref<'a>, B::Ref<'a>);
-    type Mut<'a> = (A::Mut<'a>, B::Mut<'a>);
+macro_rules! container_tuples {
+    ($($T:ident),*) => {
+#[allow(non_snake_case)]
+impl<$($T: Container),*> Container for ($($T),*) {
+    type Ref<'a> = ($($T::Ref<'a>),*);
+    type Mut<'a> = ($($T::Mut<'a>),*);
 
     fn container_ref(&self) -> Self::Ref<'_> {
-        (self.0.container_ref(), self.1.container_ref())
+        let ($($T),*) = self;
+        ($($T.container_ref()),*)
     }
     fn container_mut(&mut self) -> Self::Mut<'_> {
-        (self.0.container_mut(), self.1.container_mut())
+        let ($($T),*) = self;
+        ($($T.container_mut()),*)
     }
 }
+#[allow(non_snake_case)]
+impl<$($T: Component),*> ComponentRetrieve for ($($T),*) {
+    type Containers = ($($T::Container),*);
+
+    fn retrieve(components: &Components) -> Option<<Self::Containers as Container>::Ref<'_>> {
+        $(
+            let $T = components
+            .get(&$T::ID)?
+            .downcast_ref::<$T::Container>()?
+            .container_ref();
+        )*
+        Some(($($T),*))
+    }
+    fn retrieve_mut(
+        components: &mut Components,
+    ) -> Option<<Self::Containers as Container>::Mut<'_>> {
+        let [$($T),*] = components.get_disjoint_mut([$(&$T::ID),*]);
+        $(
+            let $T = $T?.downcast_mut::<$T::Container>()?.container_mut();
+        )*
+        Some(($($T),*))
+    }
+}
+    };
+}
+container_tuples!(A, B);
+container_tuples!(A, B, C);
+container_tuples!(A, B, C, D);
+container_tuples!(A, B, C, D, E);
+container_tuples!(A, B, C, D, E, F);
+container_tuples!(A, B, C, D, E, F, G);
+container_tuples!(A, B, C, D, E, F, G, H);
+container_tuples!(A, B, C, D, E, F, G, H, I);
+container_tuples!(A, B, C, D, E, F, G, H, I, J);

@@ -50,6 +50,7 @@ impl ure::app::Game for Game {
             group.add_component(Surfaces);
             group.add_component(WindowSizes);
             group.new(1);
+            group.get_components_mut::<Windows>().unwrap()[0].set_title("URE");
             RefCell::new(group)
         });
         // let mut visuals_2d = Visuals2D::new();

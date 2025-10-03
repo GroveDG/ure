@@ -1,14 +1,14 @@
+use std::cell::RefCell;
+
 use glam::Affine2;
 use slotmap::new_key_type;
 use spin_sleep::sleep;
 use ure::{
-    app::{init_windows, App, AppReceiver, Window},
-    data, element,
-    gpu::{
-        begin_passes, init_encoders, init_surface_sizes, init_surface_textures, init_surfaces, instancing::InstanceBuffer, present_surfaces, reconfigure_surfaces, rendering::Rendering, submit_encoders, two::{Instance2D, Mesh2DHandle, Visuals2D, DEFAULT_2D, QUAD}, Color, Surface
-    },
-    store::{Data, Element},
+    app::{App, Surfaces, WindowIds, WindowSizes, Windows, reconfigure_surfaces},
+    gpu::GPU,
 };
+use ure_data::{Data, group::Group};
+use wgpu::CommandEncoderDescriptor;
 use winit::{dpi::PhysicalSize, event_loop::EventLoop, window::WindowAttributes};
 
 #[repr(usize)]
@@ -26,11 +26,10 @@ fn main() {
 }
 
 struct Game {
-    windows: Element,
     data: Data<GameKey>,
-    test_visuals: GameKey,
-    visuals_2d: Visuals2D<GameKey>,
-    receiver: AppReceiver,
+    windows: GameKey,
+    // test_visuals: GameKey,
+    // visuals_2d: Visuals2D<GameKey>,
 }
 
 new_key_type! {
@@ -38,52 +37,24 @@ new_key_type! {
 }
 
 impl ure::app::Game for Game {
-    fn new(receiver: AppReceiver) -> Self {
-        let windows = element! {
-            len: 1,
-            {
-
-            }
-            {
-                windows: many Window { init_windows([WindowAttributes::default()], windows, &receiver); },
-                surfaces: many Surface { init_surfaces(windows, surfaces) },
-                sizes: many PhysicalSize<u32> { init_surface_sizes(windows, sizes) },
-            }
-        };
+    fn new(windows: Windows) -> Self {
         let mut data = Data::<GameKey>::with_key();
-        let test_visuals = data.insert(element! {
-            len: 1,
-            {
-                Rendering: DEFAULT_2D,
-            }
-            {
-                transforms: many Affine2 { for i in 0..len { transforms[i].write(Default::default()); } },
-                color: many Color { for i in 0..len { color[i].write(Color::WHITE); } },
-                instances: one InstanceBuffer<Instance2D> { instances.extend(len, |instances| {
-                    for i in 0..len {
-                        let transform = transforms[i];
-                        let matrix = transform.matrix2;
-                        let translation = transform.translation;
-                        let color = color[i];
-                        instances[i].write(Instance2D {
-                            col_0: matrix.x_axis,
-                            col_1: matrix.y_axis,
-                            position: translation,
-                            color: color
-                        });
-                    }
-                }) },
-                meshes: many Mesh2DHandle { for i in 0..len { meshes[i].write(QUAD.load()); } },
-            }
+        let windows = data.insert({
+            let mut group = Group::default();
+            group.add_component(windows);
+            group.add_component(WindowIds);
+            group.add_component(Surfaces);
+            group.add_component(WindowSizes);
+            group.new(1);
+            RefCell::new(group)
         });
-        let mut visuals_2d = Visuals2D::new();
-        visuals_2d.add(test_visuals);
+        // let mut visuals_2d = Visuals2D::new();
+        // visuals_2d.add(test_visuals);
         Game {
             windows,
             data,
-            test_visuals,
-            visuals_2d,
-            receiver,
+            // test_visuals,
+            // visuals_2d,
         }
     }
 
@@ -92,31 +63,26 @@ impl ure::app::Game for Game {
         let mut delta = std::time::Duration::ZERO;
         loop {
             frame_start = std::time::Instant::now();
+
+            // RENDERING
             {
-                data! {
-                    self.windows,
-                    {
-                        windows: Window,
-                        surfaces: Surface,
-                        sizes: PhysicalSize<u32>,
-                    } else {
-                        panic!()
-                    }
+                let surface_textures = {
+                    let mut windows = self.data.get(self.windows).unwrap().borrow_mut();
+                    let (windows, sizes, surfaces) = windows
+                        .get_components_mut::<(Windows, WindowSizes, Surfaces)>()
+                        .unwrap();
+                    reconfigure_surfaces(windows, sizes, surfaces)
+                };
+                let encoder = GPU
+                    .device
+                    .create_command_encoder(&CommandEncoderDescriptor::default());
+
+                // RENDER PASSES
+
+                GPU.queue.submit([encoder.finish()]);
+                for surface_teture in surface_textures {
+                    surface_teture.present();
                 }
-                reconfigure_surfaces(windows, surfaces, sizes);
-                let surface_textures = init_surface_textures(surfaces);
-                {
-                    let mut encoders = init_encoders(surfaces.len());
-                    {
-                        let mut passes =
-                            begin_passes(&mut encoders, &surface_textures, wgpu::Color::BLACK);
-                        for pass in passes.iter_mut() {
-                            self.visuals_2d.render(&self.data, pass);
-                        }
-                    }
-                    submit_encoders(encoders);
-                }
-                present_surfaces(surface_textures);
             }
             sleep(FRAME_TIME.saturating_sub(frame_start.elapsed()));
             delta = frame_start.elapsed();

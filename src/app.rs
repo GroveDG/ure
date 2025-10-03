@@ -1,29 +1,147 @@
 use std::{
     marker::PhantomData,
-    mem::MaybeUninit,
     sync::{
         Arc,
         mpsc::{Receiver, Sender, channel},
     },
 };
 
-use ure_data::Group;
+use ure_data::group::{Component, ComponentBox, Group, IndexSet};
+use wgpu::{Surface, SurfaceTexture, wgt::CommandEncoderDescriptor};
 use winit::{
     application::ApplicationHandler,
+    dpi::PhysicalSize,
     event_loop::{ActiveEventLoop, EventLoopProxy},
-    window::{WindowAttributes, WindowId},
+    window::{Window, WindowAttributes, WindowId},
 };
+
+use crate::gpu::GPU;
 
 pub mod input;
 
 pub type Input = Arc<input::Input>;
 
-pub type Window = Arc<winit::window::Window>;
-
 pub struct Windows {
-    ids: IndexSet<WindowId>,
-    windows: Vec<Window>,
-    surfaces: Vec<Surface>,
+    receiver: Receiver<Window>,
+    proxy: EventLoopProxy<Event>,
+}
+impl Windows {
+    pub fn new_window(&self, attrs: WindowAttributes) -> Arc<Window> {
+        self.proxy.send_event(Event::NewWindow(attrs)).unwrap();
+        Arc::new(self.receiver.recv().unwrap())
+    }
+}
+impl Component for Windows {
+    const IDENT: &'static str = "Windows";
+
+    type Container = Vec<Arc<Window>>;
+    type Dependencies = ();
+
+    fn new(self) -> ure_data::group::ComponentBox {
+        ComponentBox::new::<Self>(
+            None,
+            move |c, range, _| {
+                for i in range {
+                    c.push(self.new_window(Default::default()));
+                }
+            },
+            |c, range| {
+                for i in range.rev() {
+                    c.swap_remove(i);
+                }
+            },
+        )
+    }
+}
+pub struct WindowIds;
+impl Component for WindowIds {
+    const IDENT: &'static str = "WindowIds";
+
+    type Container = IndexSet<WindowId>;
+    type Dependencies = Windows;
+
+    fn new(self) -> ure_data::group::ComponentBox {
+        ComponentBox::new::<Self>(
+            None,
+            |c, range, d| {
+                for i in range {
+                    c.insert(d[i].id());
+                }
+            },
+            |c, range| {
+                for i in range {
+                    c.swap_remove_index(i);
+                }
+            },
+        )
+    }
+}
+pub struct WindowSizes;
+impl Component for WindowSizes {
+    const IDENT: &'static str = "WindowIds";
+
+    type Container = Vec<PhysicalSize<u32>>;
+    type Dependencies = Windows;
+
+    fn new(self) -> ComponentBox {
+        ComponentBox::new::<Self>(
+            None,
+            |c, range, d| {
+                for i in range {
+                    c.push(Default::default());
+                }
+            },
+            |c, range| {
+                for i in range {
+                    c.swap_remove(i);
+                }
+            },
+        )
+    }
+}
+pub struct Surfaces;
+impl Component for Surfaces {
+    const IDENT: &'static str = "Surfaces";
+
+    type Container = Vec<wgpu::Surface<'static>>;
+    type Dependencies = Windows;
+
+    fn new(self) -> ure_data::group::ComponentBox {
+        ComponentBox::new::<Self>(
+            None,
+            |c, range, d| {
+                for i in range {
+                    c.push(GPU.instance.create_surface(d[i].clone()).unwrap());
+                }
+            },
+            |c, range| {
+                for i in range {
+                    c.swap_remove(i);
+                }
+            },
+        )
+    }
+}
+pub fn reconfigure_surfaces(
+    windows: &[Arc<Window>],
+    sizes: &mut [PhysicalSize<u32>],
+    surfaces: &[Surface<'static>],
+) -> Vec<SurfaceTexture> {
+    let mut textures = Vec::new();
+    for i in 0..surfaces.len() {
+        let size = windows[i].inner_size();
+        if sizes[i] != size {
+            sizes[i] = size;
+            surfaces[i].configure(
+                &GPU.device,
+                &surfaces[i]
+                    .get_default_config(&GPU.adapter, size.width, size.height)
+                    .unwrap(),
+            );
+        }
+        textures.push(surfaces[i].get_current_texture().unwrap());
+    }
+    textures
 }
 
 #[derive(Debug, Clone)]
@@ -32,28 +150,9 @@ pub enum Event {
     Exit,
 }
 
-pub fn new_windows() -> Group {
-    let group = Group::default();
-
-    group;
-
-    group
-}
-
 pub trait Game: 'static {
-    fn new(recv: AppReceiver) -> Self;
+    fn new(windows: Windows) -> Self;
     fn run(self);
-}
-pub fn init_windows(
-    attributes: impl IntoIterator<Item = WindowAttributes>,
-    windows: &mut [MaybeUninit<Window>],
-    receiver: &AppReceiver,
-) {
-    let mut attributes = attributes.into_iter();
-    for i in 0..windows.len() {
-        let attributes = attributes.next().unwrap();
-        windows[i].write(receiver.new_window(attributes));
-    }
 }
 
 pub struct AppSender {
@@ -61,16 +160,8 @@ pub struct AppSender {
     pub input: Input,
 }
 
-pub struct AppReceiver {
-    pub window: Receiver<winit::window::Window>,
+pub struct InputReceiver {
     pub input: Input,
-    pub proxy: EventLoopProxy<Event>,
-}
-impl AppReceiver {
-    pub fn new_window(&self, attrs: WindowAttributes) -> Window {
-        self.proxy.send_event(Event::NewWindow(attrs)).unwrap();
-        Arc::new(self.window.recv().unwrap())
-    }
 }
 
 pub struct App<G: Game> {
@@ -89,14 +180,13 @@ impl<G: Game> ApplicationHandler<Event> for App<G> {
             window: window_send,
             input: input.clone(),
         };
-        let app_recv = AppReceiver {
-            window: window_recv,
-            input,
+        let windows = Windows {
+            receiver: window_recv,
             proxy,
         };
 
         self.game = Some(std::thread::spawn(move || {
-            let game = G::new(app_recv);
+            let game = G::new(windows);
             game.run();
         }));
     }

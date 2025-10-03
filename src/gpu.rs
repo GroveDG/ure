@@ -1,14 +1,9 @@
-mod data;
-pub use data::{BufferTyped, BufferViewMutTyped, BufferViewTyped};
-
 use std::sync::OnceLock;
 
 use wgpu::{
     Adapter, Device, DeviceDescriptor, Instance, InstanceDescriptor, Queue, RequestAdapterOptions,
     TextureFormat,
 };
-
-pub type Surface = wgpu::Surface<'static>;
 
 pub static GPU: std::sync::LazyLock<Gpu> =
     std::sync::LazyLock::new(|| futures::executor::block_on(Gpu::new()));

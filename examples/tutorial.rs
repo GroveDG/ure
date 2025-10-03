@@ -4,7 +4,9 @@ use glam::Affine2;
 use slotmap::new_key_type;
 use spin_sleep::sleep;
 use ure::{
-    app::{App, Surfaces, WindowIds, WindowSizes, Windows, reconfigure_surfaces},
+    app::{
+        App, AppProxy, Surfaces, WindowClose, WindowIds, WindowSizes, Windows, reconfigure_surfaces,
+    },
     gpu::GPU,
 };
 use ure_data::{Data, group::Group};
@@ -26,6 +28,7 @@ fn main() {
 }
 
 struct Game {
+    app: AppProxy,
     data: Data<GameKey>,
     windows: GameKey,
     // test_visuals: GameKey,
@@ -37,11 +40,12 @@ new_key_type! {
 }
 
 impl ure::app::Game for Game {
-    fn new(windows: Windows) -> Self {
+    fn new(app: AppProxy, windows: Windows, window_close: WindowClose) -> Self {
         let mut data = Data::<GameKey>::with_key();
         let windows = data.insert({
             let mut group = Group::default();
             group.add_component(windows);
+            group.add_component(window_close);
             group.add_component(WindowIds);
             group.add_component(Surfaces);
             group.add_component(WindowSizes);
@@ -51,6 +55,7 @@ impl ure::app::Game for Game {
         // let mut visuals_2d = Visuals2D::new();
         // visuals_2d.add(test_visuals);
         Game {
+            app,
             windows,
             data,
             // test_visuals,
@@ -61,8 +66,25 @@ impl ure::app::Game for Game {
     fn run(mut self) {
         let mut frame_start;
         let mut delta = std::time::Duration::ZERO;
-        loop {
+        'game: loop {
             frame_start = std::time::Instant::now();
+
+            {
+                let mut windows = self.data.get(self.windows).unwrap().borrow_mut();
+                let close = windows.get_components::<WindowClose>().unwrap();
+                let mut delete = Vec::new();
+                for (i, c) in close.iter().enumerate() {
+                    if c.load(std::sync::atomic::Ordering::Relaxed) {
+                        delete.push(i);
+                    }
+                }
+                for i in delete {
+                    windows.delete(i..i + 1);
+                }
+                if windows.is_empty() {
+                    break 'game;
+                }
+            }
 
             // RENDERING
             {
@@ -87,5 +109,6 @@ impl ure::app::Game for Game {
             sleep(FRAME_TIME.saturating_sub(frame_start.elapsed()));
             delta = frame_start.elapsed();
         }
+        self.app.exit();
     }
 }

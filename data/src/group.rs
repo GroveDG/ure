@@ -82,6 +82,9 @@ impl Group {
     pub fn len(&self) -> usize {
         self.len
     }
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
     pub fn add_component<C: Component>(&mut self, component: C) {
         let mut boxed = component.new();
         (boxed.new)(boxed.container.as_mut(), 0..self.len, &self);
@@ -108,11 +111,13 @@ impl Group {
             (component.new)(component.container.as_mut(), self.len..num, &self);
             self.components.insert(id, component);
         }
+        self.len += num;
     }
     pub fn delete(&mut self, range: Range<usize>) {
         for (id, component) in self.components.iter_mut() {
             (component.delete)(component.container.as_mut(), range.clone());
         }
+        self.len -= range.len();
     }
 }
 

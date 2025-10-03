@@ -1,12 +1,14 @@
 use std::{
+    collections::HashMap,
     marker::PhantomData,
     sync::{
         Arc,
+        atomic::AtomicBool,
         mpsc::{Receiver, Sender, channel},
     },
 };
 
-use ure_data::group::{Component, ComponentBox, Group, IndexSet};
+use ure_data::group::{BitVec, Component, ComponentBox, Group, IndexSet};
 use wgpu::{Surface, SurfaceTexture, wgt::CommandEncoderDescriptor};
 use winit::{
     application::ApplicationHandler,
@@ -122,6 +124,33 @@ impl Component for Surfaces {
         )
     }
 }
+
+pub struct WindowClose {
+    receiver: Receiver<Arc<AtomicBool>>,
+}
+impl Component for WindowClose {
+    const IDENT: &'static str = "WindowClosed";
+
+    type Container = Vec<Arc<AtomicBool>>;
+    type Dependencies = Windows;
+
+    fn new(self) -> ComponentBox {
+        ComponentBox::new::<Self>(
+            None,
+            move |c, range, d| {
+                for i in range {
+                    c.push(self.receiver.recv().unwrap());
+                }
+            },
+            |c, range| {
+                for i in range {
+                    c.swap_remove(i);
+                }
+            },
+        )
+    }
+}
+
 pub fn reconfigure_surfaces(
     windows: &[Arc<Window>],
     sizes: &mut [PhysicalSize<u32>],
@@ -151,12 +180,13 @@ pub enum Event {
 }
 
 pub trait Game: 'static {
-    fn new(windows: Windows) -> Self;
+    fn new(app: AppProxy, windows: Windows, window_close: WindowClose) -> Self;
     fn run(self);
 }
 
 pub struct AppSender {
     pub window: Sender<winit::window::Window>,
+    pub window_close: Sender<Arc<AtomicBool>>,
     pub input: Input,
 }
 
@@ -164,29 +194,48 @@ pub struct InputReceiver {
     pub input: Input,
 }
 
+struct AppWindow {
+    closed: Arc<AtomicBool>,
+}
+
+pub struct AppProxy {
+    inner: EventLoopProxy<Event>,
+}
+impl AppProxy {
+    pub fn exit(&self) {
+        self.inner.send_event(Event::Exit).unwrap();
+    }
+}
+
 pub struct App<G: Game> {
     game: Option<std::thread::JoinHandle<()>>,
     proxy: EventLoopProxy<Event>,
     sender: AppSender,
+    windows: HashMap<WindowId, AppWindow>,
     _marker: PhantomData<G>,
 }
 impl<G: Game> ApplicationHandler<Event> for App<G> {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         let proxy = self.proxy.clone();
         let (window_send, window_recv) = channel();
+        let (window_close_send, window_close_recv) = channel();
         let input: Input = Default::default();
 
         self.sender = AppSender {
             window: window_send,
+            window_close: window_close_send,
             input: input.clone(),
         };
         let windows = Windows {
             receiver: window_recv,
-            proxy,
+            proxy: proxy.clone(),
+        };
+        let window_close = WindowClose {
+            receiver: window_close_recv,
         };
 
         self.game = Some(std::thread::spawn(move || {
-            let game = G::new(windows);
+            let game = G::new(AppProxy { inner: proxy }, windows, window_close);
             game.run();
         }));
     }
@@ -200,7 +249,12 @@ impl<G: Game> ApplicationHandler<Event> for App<G> {
         _ = (event_loop, window_id);
         match event {
             // winit::event::WindowEvent::Resized(_) => todo!(),
-            // winit::event::WindowEvent::CloseRequested => todo!(),
+            winit::event::WindowEvent::CloseRequested => self
+                .windows
+                .get(&window_id)
+                .unwrap()
+                .closed
+                .store(true, std::sync::atomic::Ordering::Relaxed),
             _ => {}
         }
     }
@@ -217,14 +271,12 @@ impl<G: Game> ApplicationHandler<Event> for App<G> {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
         match event {
             Event::NewWindow(attrs) => {
-                if self
-                    .sender
-                    .window
-                    .send(event_loop.create_window(attrs).unwrap())
-                    .is_err()
-                {
-                    event_loop.exit()
-                }
+                let window = event_loop.create_window(attrs).unwrap();
+                let close = Arc::new(AtomicBool::new(false));
+                _ = self.sender.window_close.send(close.clone());
+                self.windows
+                    .insert(window.id(), AppWindow { closed: close });
+                _ = self.sender.window.send(window);
             }
             Event::Exit => {
                 event_loop.exit();
@@ -246,8 +298,10 @@ impl<G: Game> App<G> {
             proxy,
             sender: AppSender {
                 window: channel().0,
+                window_close: channel().0,
                 input: Default::default(),
             },
+            windows: Default::default(),
             _marker: Default::default(),
         }
     }

@@ -1,7 +1,11 @@
 use std::sync::{Arc, LazyLock};
 
 use glam::Vec2;
-use ure_data::{resource::Resource, Data};
+use ure_data::{
+    Data,
+    group::{Component, ComponentBox, OneOrMany},
+    resource::Resource,
+};
 use wgpu::{
     BindGroupDescriptor, BindGroupLayout, BufferUsages, FragmentState, MultisampleState,
     PipelineCompilationOptions, RenderPipeline, RenderPipelineDescriptor, VertexAttribute,
@@ -10,7 +14,7 @@ use wgpu::{
     wgt::BufferDescriptor,
 };
 
-use crate::gpu::{Color, RgbaColor, GPU};
+use crate::gpu::{Colors, GPU, Rgba8, Srgba, TypedBuffer};
 
 pub type MeshHandle2D = Arc<Mesh2D>;
 
@@ -19,7 +23,7 @@ pub type MeshHandle2D = Arc<Mesh2D>;
 pub struct Vertex2D {
     pub position: Vec2,
     pub uv: Vec2,
-    pub color: RgbaColor,
+    pub color: Rgba8,
 }
 impl Vertex2D {
     const ATTRIBUTES: &'static [VertexAttribute] = &wgpu::vertex_attr_array![
@@ -40,7 +44,7 @@ impl Vertex2D {
 #[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Instance2D {
     pub transform: [f32; 6],
-    pub color: RgbaColor,
+    pub color: Rgba8,
 }
 impl Instance2D {
     const ATTRIBUTES: &'static [VertexAttribute] = &wgpu::vertex_attr_array![
@@ -57,6 +61,50 @@ impl Instance2D {
         step_mode: wgpu::VertexStepMode::Instance,
         attributes: Self::ATTRIBUTES,
     };
+}
+
+pub struct Instances2D;
+impl Component for Instances2D {
+    const IDENT: &'static str = "Instances2D";
+
+    type Container = TypedBuffer<Instance2D>;
+    type Dependencies = ();
+
+    fn new(self) -> ure_data::group::ComponentBox {
+        ComponentBox::new::<Self>(
+            Some(TypedBuffer::new(BufferUsages::VERTEX)),
+            |c, range, d| {
+                c.extend(range.len());
+            },
+            |c, range| {
+                c.delete(range);
+            },
+        )
+    }
+}
+pub struct Meshes2D;
+impl Component for Meshes2D {
+    const IDENT: &'static str = "Meshes2D";
+
+    type Container = OneOrMany<Arc<Mesh2D>>;
+    type Dependencies = ();
+
+    fn new(self) -> ComponentBox {
+        ComponentBox::new::<Self>(None, |c, range, d| {
+            if let OneOrMany::Many(c) = c {
+                for i in range {
+                    let empty = EMPTY.load();
+                    c.push(empty.clone());
+                }
+            }
+        }, |c, range| {
+            if let OneOrMany::Many(c) = c {
+                for i in range.rev() {
+                    c.swap_remove(i);
+                }
+            }
+        })
+    }
 }
 
 pub static CAMERA_LAYOUT: LazyLock<BindGroupLayout> = LazyLock::new(|| {
@@ -103,7 +151,7 @@ pub static PIPELINE: LazyLock<RenderPipeline> = LazyLock::new(|| {
                 entry_point: Some("fragment"),
                 compilation_options: PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: super::SURFACE_FORMAT,
+                    format: todo!(),
                     blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -128,6 +176,10 @@ pub static PIPELINE: LazyLock<RenderPipeline> = LazyLock::new(|| {
         })
 });
 
+pub static EMPTY: Resource<Mesh2D> = Resource::new(|| {
+    Mesh2D::new(&[], &[])
+});
+
 pub static QUAD: Resource<Mesh2D> = Resource::new(|| {
     Mesh2D::new(
         &[
@@ -135,25 +187,25 @@ pub static QUAD: Resource<Mesh2D> = Resource::new(|| {
                 // Top Left
                 position: Vec2 { x: -0.5, y: 0.5 },
                 uv: Vec2::ZERO,
-                color: Color::WHITE,
+                color: Srgba::WHITE.to_rgba8(),
             },
             Vertex2D {
                 // Top Right
                 position: Vec2 { x: -0.5, y: -0.5 },
                 uv: Vec2::X,
-                color: Color::WHITE,
+                color: Srgba::WHITE.to_rgba8(),
             },
             Vertex2D {
                 // Bottom Left
                 position: Vec2 { x: 0.5, y: 0.5 },
                 uv: Vec2::Y,
-                color: Color::WHITE,
+                color: Srgba::WHITE.to_rgba8(),
             },
             Vertex2D {
                 // Bottom Right
                 position: Vec2 { x: 0.5, y: -0.5 },
                 uv: Vec2::ONE,
-                color: Color::WHITE,
+                color: Srgba::WHITE.to_rgba8(),
             },
         ],
         &[0, 1, 2, 2, 1, 3],
@@ -203,10 +255,10 @@ impl<Key: slotmap::Key> Visuals2D<Key> {
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         });
         Self {
-            groups,
+            keys: Vec::new(),
             instance_buffer: GPU.device.create_buffer(&BufferDescriptor {
                 label: Some("visuals 2d instance"),
-                size: len as u64 * Instance2D::LAYOUT.array_stride,
+                size: 0,
                 usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
@@ -222,6 +274,17 @@ impl<Key: slotmap::Key> Visuals2D<Key> {
         }
     }
     pub fn render<'a>(&self, data: Data<Key>, pass: &mut wgpu::RenderPass<'a>) {
+        for key in self.keys {
+            let Some(group) = data.get(key) else {
+                continue;
+            };
+            let mut group = group.get_mut();
+            let Some((mut instances, meshes)) =
+                group.get_components_mut::<(Instances2D, Meshes2D)>()
+            else {
+                continue;
+            };
+        }
         GPU.queue.write_buffer(
             &self.instance_buffer,
             0,

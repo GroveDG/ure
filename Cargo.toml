@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 bytemuck = "1"
 color = { version = "0", features = ["bytemuck"] }
-facet = "0.28.1"
 fontdue = "0"
 glam = { version = "0", features = ["bytemuck"] }
 ordered-float = "5"
@@ -19,7 +18,7 @@ slotmap = "1"
 spin_sleep = "1"
 winit = { version = "0", default-features = false, features = ["ahash", "bytemuck", "memmap2", "percent-encoding", "rwh_06", "wayland", "wayland-backend", "wayland-client", "wayland-dlopen", "wayland-protocols", "wayland-protocols-plasma",] }
 ure-data = { path = "data" }
-wgpu = "26.0.1"
+wgpu = "27"
 futures = "0.3.31"
 
 [features]

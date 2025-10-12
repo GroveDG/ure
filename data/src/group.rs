@@ -1,18 +1,18 @@
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
-    marker::PhantomData,
     ops::Range,
 };
 
 pub use bitvec::{slice::BitSlice, vec::BitVec};
 pub use indexmap::IndexSet;
+use multimap::MultiMap;
 pub use one_or_many::OneOrMany;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ComponentId(u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FunctionId(u64);
+pub struct MethodId(*const ());
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SignalId(u64);
 impl SignalId {
@@ -40,122 +40,72 @@ pub trait Component: 'static {
     type Container: Container;
 }
 
-pub struct Method<Components: ComponentRetrieve, Args> {
-    id: FunctionId,
-    f: Box<dyn FnMut(<Components::Containers as Container>::Mut<'_>, Args)>,
-    _marker: PhantomData<Components>,
-}
-
-impl<C: ComponentRetrieve + 'static, Args: 'static> Method<C, Args> {
-    fn call(method: &mut dyn Any, components: &mut Components, args: Args) {
-        let Some(method) = method.downcast_mut::<Method<C, Args>>() else {
-            return;
-        };
-        let Some(components) = C::retrieve_mut(components) else {
-            return;
-        };
-        (method.f)(components, args)
-    }
-}
-
 type ComponentBox = Box<dyn Any>;
 
-struct MethodBox {
-    any: Box<dyn Any>,
-    id: FunctionId,
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+struct AnyFn(*const (), TypeId);
+impl AnyFn {
+    fn is<T: Any>(&self) -> bool {
+        TypeId::of::<T>() == self.1
+    }
+}
+type MethodFn<C, Args> = fn(<<C as ComponentRetrieve>::Containers as Container>::Mut<'_>, Args);
+type MethodCall<Args> = fn(&Method, &mut Components, Args);
+
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+pub struct Method {
+    method: AnyFn,
+    receiver: AnyFn,
     components: &'static [ComponentId],
-    signals: Vec<SignalId>,
 }
-impl MethodBox {
-    pub fn new<C: ComponentRetrieve + 'static, A: 'static>(method: Method<C, A>) -> Self {
+impl Method {
+    pub fn new<C: ComponentRetrieve + 'static, Args: 'static>(f: MethodFn<C, Args>) -> Self {
         Self {
-            id: method.id,
-            any: Box::new(method),
+            method: AnyFn(f as *const (), TypeId::of::<MethodFn<C, Args>>()),
+            receiver: AnyFn(Self::call::<C, Args> as *const (), TypeId::of::<Args>()),
             components: C::IDS,
-            signals: Vec::new(),
         }
     }
-}
-
-type MethodCall<Args> = fn(&mut dyn Any, &mut Components, Args);
-
-pub struct Connection<Args> {
-    id: FunctionId,
-    f: MethodCall<Args>,
-}
-
-struct SignalBox<Args> {
-    connections: Vec<Connection<Args>>,
-}
-impl<Args> SignalBox<Args> {
-    fn connect(&mut self, method: FunctionId, call: MethodCall<Args>) {
-        self.connections.push(Connection { id: method, f: call });
-    }
-    fn call(&self, components: &mut Components, methods: &mut Methods, args: Args) {
-        for connection in self.connections.iter() {
-            let Some(method) = methods.get_mut(&connection.id) else {
-                continue;
-            };
-            (connection.f)(&mut method.any, components, args)
+    pub fn call<C: ComponentRetrieve + 'static, Args: 'static>(
+        &self,
+        components: &mut Components,
+        args: Args,
+    ) -> Result<(), ()> {
+        if self.method.is::<MethodFn<C, Args>>() {
+            return Err(());
         }
-    }
-}
-trait Signaling: Any {
-    fn disconnect(&mut self, method: &FunctionId) -> Result<(), ()>;
-}
-impl<Args: Any> Signaling for SignalBox<Args> {
-    fn disconnect(&mut self, method: &FunctionId) -> Result<(), ()> {
-        let Some(i) = self.connections.iter().position(|c| c.id == *method) else {
+        let method: MethodFn<C, Args> = unsafe { std::mem::transmute(self.method.0) };
+        let Some(components) = C::retrieve_mut(components) else {
             return Err(());
         };
-        self.connections.remove(i);
+        (method)(components, args);
         Ok(())
+    }
+    pub fn recv<Args: 'static>(&self, components: &mut Components, args: Args) -> Result<(), ()> {
+        if self.method.is::<Args>() {
+            return Err(());
+        }
+        let receiver: MethodCall<Args> = unsafe { std::mem::transmute(self.receiver.0) };
+        (receiver)(self, components, args);
+        Ok(())
+    }
+    pub fn id(&self) -> MethodId {
+        MethodId(self.method.0)
     }
 }
 
 type Components = HashMap<ComponentId, ComponentBox>;
-type Methods = HashMap<FunctionId, MethodBox>;
-#[derive(Default)]
-pub struct Signals {
-    inner: HashMap<SignalId, Box<dyn Signaling>>,
-}
-impl Signals {
-    fn connect<Args: 'static>(&mut self, signal: &SignalId, method: FunctionId, call: MethodCall<Args> ) -> Result<(), ()> {
-        let Some(signal) = self.inner.get_mut(signal) else {
-            return Err(());
-        };
-        let Some(signal) = (signal.as_mut() as &mut dyn Any).downcast_mut::<SignalBox<Args>>()
-        else {
-            return Err(());
-        };
-        signal.connect(method, call);
-        Ok(())
-    }
-    fn disconnect(&mut self, signal: &SignalId, method: &FunctionId) -> Result<(), ()> {
-        let Some(signal) = self.inner.get_mut(signal) else {
-            return Err(());
-        };
-        signal.disconnect(method);
-        Ok(())
-    }
-    fn call<Args: 'static>(&mut self, signal: &SignalId, components: &mut Components, methods: &mut Methods, args: Args) -> Result<(), ()> {
-        let Some(signal) = self.inner.get(signal) else {
-            return Err(());
-        };
-        let Some(signal) = (signal.as_mut() as &mut dyn Any).downcast_mut::<SignalBox<Args>>()
-        else {
-            return Err(());
-        };
-        signal.call(components, methods, args);
-    }
-}
+type Signals = MultiMap<SignalId, Method>;
+type Connection = MultiMap<MethodId, SignalId>;
+type Dependency = MultiMap<ComponentId, MethodId>;
 
 #[derive(Default)]
 pub struct Group {
     len: usize,
     components: Components,
-    methods: Methods,
     signals: Signals,
+    connection: Connection,
+    dependency: Dependency,
 }
 
 impl Group {
@@ -165,33 +115,30 @@ impl Group {
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
-    pub fn add_component<C: Component, N: ComponentRetrieve, D: ComponentRetrieve>(
-        &mut self,
-        new: Method<N, Range<usize>>,
-        delete: Method<D, Range<usize>>,
-    ) {
-        let new_id = new.id;
-        self.connect(new, &NEW);
-        self.connect(delete, &DELETE);
+    pub fn add_component<C: Component>(&mut self, new: Method, delete: Method) {
         self.components.insert(C::ID, Box::new(C::Container::new()));
-        self.call::<N, Range<usize>>(&new_id, 0..self.len);
+        new.recv(&mut self.components, 0..self.len);
+        self.connect(new, NEW);
+        self.connect(delete, DELETE);
     }
-    fn connect<C: ComponentRetrieve + 'static, Args: Clone + 'static>(
-        &mut self,
-        method: Method<C, Args>,
-        signal: &SignalId,
-    ) -> Result<(), ()> {
-        for comp in C::IDS {
-            if !self.components.contains_key(comp) {
+    fn connect(&mut self, method: Method, signal: SignalId) -> Result<(), ()> {
+        for component in method.components {
+            if !self.components.contains_key(component) {
                 return Err(());
             }
         }
-        self.signals.connect(signal, method.id, Method::<C, Args>::call);
-        self.methods.insert(method.id, MethodBox::new(method));
+        for component in method.components.iter().copied() {
+            self.dependency.insert(component, method.id());
+        }
+        self.signals.insert(signal, method);
         Ok(())
     }
-    fn disconnect(&mut self, signal: &SignalId, method: &FunctionId) {
-        self.signals.disconnect(signal, method);
+    fn disconnect(&mut self, signal: &SignalId, method: &MethodId) -> Result<(), ()> {
+        let Some(signal) = self.signals.get_vec_mut(signal) else {
+            return Err(());
+        };
+        for _ in signal.extract_if(.., |m| &m.id() == method) {}
+        Ok(())
     }
     pub fn get_components<C: ComponentRetrieve>(
         &self,
@@ -203,43 +150,27 @@ impl Group {
     ) -> Option<<C::Containers as Container>::Mut<'_>> {
         C::retrieve_mut(&mut self.components)
     }
-    pub fn remove_component(&mut self, id: &ComponentId) {
-        for (_, method) in self.methods.extract_if(|_, m| m.components.contains(id)) {
-            for signal in method.signals.iter() {
-                self.signals.disconnect(signal, &method.id);
-            }
-            drop(method);
-        }
-        self.components.remove(id);
-    }
-    pub fn call<C: ComponentRetrieve + 'static, Args: 'static>(
-        &mut self,
-        id: &FunctionId,
-        args: Args,
-    ) {
-        let Some(method) = self.methods.get_mut(id) else {
-            return;
+    pub fn remove_component(&mut self, id: &ComponentId) -> Result<(), ()> {
+        let Some(dependents) = self.dependency.remove(id) else {
+            return Err(())
         };
-        let Some(method) = method.any.downcast_mut::<Method<C, Args>>() else {
-            return;
-        };
-        let Some(components) = C::retrieve_mut(&mut self.components) else {
-            return;
-        };
-        (method.f)(components, args)
-    }
-    pub fn signal<Args: Clone + 'static>(&mut self, signal: &SignalId, args: Args) {
-        let Some(signal) = self.signals.get(signal) else {
-            return;
-        };
-        let Some(signal) = signal.downcast_ref::<SignalBox<Args>>() else {
-            return;
-        };
-        for connection in signal.connections.iter() {
-            let Some(method) = self.methods.get_mut(&connection.id) else {
+        for method in dependents {
+            let Some(signals) = self.connection.remove(&method) else {
                 continue;
             };
-            (connection.f)(method, &mut self.components, args.clone())
+            for signal in signals {
+                self.disconnect(&signal, &method);
+            }
+        }
+        self.components.remove(id);
+        Ok(())
+    }
+    pub fn signal<Args: Clone + 'static>(&mut self, signal: &SignalId, args: Args) {
+        let Some(signal) = self.signals.get_vec(signal) else {
+            return;
+        };
+        for method in signal {
+            method.recv(&mut self.components, args.clone());
         }
     }
     pub fn new(&mut self, num: usize) {

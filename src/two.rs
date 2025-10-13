@@ -3,7 +3,7 @@ use std::sync::{Arc, LazyLock};
 use glam::Vec2;
 use ure_data::{
     Data,
-    group::{Component, ComponentBox, OneOrMany},
+    group::{ComponentBundle, ComponentBox, OneOrMany},
     resource::Resource,
 };
 use wgpu::{
@@ -64,7 +64,7 @@ impl Instance2D {
 }
 
 pub struct Instances2D;
-impl Component for Instances2D {
+impl ComponentBundle for Instances2D {
     const IDENT: &'static str = "Instances2D";
 
     type Container = TypedBuffer<Instance2D>;
@@ -83,7 +83,7 @@ impl Component for Instances2D {
     }
 }
 pub struct Meshes2D;
-impl Component for Meshes2D {
+impl ComponentBundle for Meshes2D {
     const IDENT: &'static str = "Meshes2D";
 
     type Container = OneOrMany<Arc<Mesh2D>>;

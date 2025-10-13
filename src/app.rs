@@ -8,7 +8,7 @@ use std::{
 	},
 };
 
-use ure_data::group::{Component, ComponentBox, IndexSet};
+use ure_data::group::{ComponentBundle, ComponentBox, IndexSet};
 use wgpu::{Surface, SurfaceTexture};
 use winit::{
 	application::ApplicationHandler,
@@ -33,7 +33,7 @@ impl Windows {
 		Arc::new(self.receiver.recv().unwrap())
 	}
 }
-impl Component for Windows {
+impl ComponentBundle for Windows {
 	const IDENT: &'static str = "Windows";
 
 	type Container = Vec<Arc<Window>>;
@@ -56,7 +56,7 @@ impl Component for Windows {
 	}
 }
 pub struct WindowIds;
-impl Component for WindowIds {
+impl ComponentBundle for WindowIds {
 	const IDENT: &'static str = "WindowIds";
 
 	type Container = IndexSet<WindowId>;
@@ -79,7 +79,7 @@ impl Component for WindowIds {
 	}
 }
 pub struct WindowSizes;
-impl Component for WindowSizes {
+impl ComponentBundle for WindowSizes {
 	const IDENT: &'static str = "WindowIds";
 
 	type Container = Vec<PhysicalSize<u32>>;
@@ -102,7 +102,7 @@ impl Component for WindowSizes {
 	}
 }
 pub struct Surfaces;
-impl Component for Surfaces {
+impl ComponentBundle for Surfaces {
 	const IDENT: &'static str = "Surfaces";
 
 	type Container = Vec<wgpu::Surface<'static>>;
@@ -128,7 +128,7 @@ impl Component for Surfaces {
 pub struct WindowClose {
 	receiver: Receiver<Arc<AtomicBool>>,
 }
-impl Component for WindowClose {
+impl ComponentBundle for WindowClose {
 	const IDENT: &'static str = "WindowClosed";
 
 	type Container = Vec<Arc<AtomicBool>>;

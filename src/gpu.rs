@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, ops::Range, sync::OnceLock};
 
 use bytemuck::Pod;
-use ure_data::group::{Component, ComponentBox, Container};
+use ure_data::group::{ComponentBundle, ComponentBox, Container};
 use wgpu::{
     Adapter, Buffer, BufferUsages, CommandBuffer, CommandEncoder, Device, DeviceDescriptor,
     Instance, InstanceDescriptor, Queue, RequestAdapterOptions, TextureFormat,
@@ -20,7 +20,7 @@ pub type Srgb = OpaqueColor<color::Srgb>;
 pub use color::Rgba8;
 
 pub struct Colors;
-impl Component for Colors {
+impl ComponentBundle for Colors {
     const IDENT: &'static str = "Colors";
 
     type Container = Vec<Rgba8>;

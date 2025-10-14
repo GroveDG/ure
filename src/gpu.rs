@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, ops::Range, sync::OnceLock};
 
 use bytemuck::Pod;
-use ure_data::group::{Component, ComponentBox, Container};
+use ure_data::group::{Component, ComponentBox, Container, Method};
 use wgpu::{
     Adapter, Buffer, BufferUsages, CommandBuffer, CommandEncoder, Device, DeviceDescriptor,
     Instance, InstanceDescriptor, Queue, RequestAdapterOptions, TextureFormat,
@@ -24,22 +24,21 @@ impl Component for Colors {
     const IDENT: &'static str = "Colors";
 
     type Container = Vec<Rgba8>;
-    type Dependencies = ();
+}
+pub struct ColorNewDefaultWhite;
+impl Method for ColorNewDefaultWhite {
+    const IDENT: &'static str = "ColorNewDefaultWhite";
 
-    fn new(self) -> ure_data::group::ComponentBox {
-        ComponentBox::new::<Self>(
-            None,
-            |c, range, d| {
-                for i in range {
-                    c.push(Srgba::WHITE.to_rgba8())
-                }
-            },
-            |c, range| {
-                for i in range.rev() {
-                    c.swap_remove(i);
-                }
-            },
-        )
+    type Args = Range<usize>;
+    type Components = Colors;
+
+    fn call(
+        components: <<Self::Components as ure_data::group::ComponentRetrieve>::Containers as Container>::Mut<'_>,
+        args: Self::Args,
+    ) {
+        for i in args {
+            components
+        }
     }
 }
 

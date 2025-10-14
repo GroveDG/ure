@@ -1,28 +1,48 @@
-use std::{
-    any::{Any, TypeId},
-    collections::HashMap,
-    ops::Range,
-};
+use std::{any::Any, collections::HashMap, marker::PhantomData, ops::Range};
 
 pub use bitvec::{slice::BitSlice, vec::BitVec};
+use indexmap::IndexMap;
 pub use indexmap::IndexSet;
 use multimap::MultiMap;
 pub use one_or_many::OneOrMany;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ComponentId(u64);
+impl ComponentId {
+    const fn new(ident: &str) -> Self {
+        Self(const_fnv1a_hash::fnv1a_hash_str_64(ident))
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MethodId(*const ());
+pub struct MethodId(u64);
+impl MethodId {
+    const fn new(ident: &str) -> Self {
+        Self(const_fnv1a_hash::fnv1a_hash_str_64(ident))
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SignalId(u64);
 impl SignalId {
-    pub const fn new(ident: &str) -> Self {
+    const fn new(ident: &str) -> Self {
         Self(const_fnv1a_hash::fnv1a_hash_str_64(ident))
     }
 }
 
-pub const NEW: SignalId = SignalId::new("New");
-pub const DELETE: SignalId = SignalId::new("Delete");
+pub struct Signal<Args> {
+    id: SignalId,
+    _marker: PhantomData<Args>,
+}
+impl<Args> Signal<Args> {
+    pub const fn new(ident: &'static str) -> Self {
+        Self {
+            id: SignalId::new(ident),
+            _marker: PhantomData,
+        }
+    }
+}
+
+pub const NEW: Signal<Range<usize>> = Signal::new("New");
+pub const DELETE: Signal<Range<usize>> = Signal::new("Delete");
 
 pub trait Container: Any {
     type Ref<'a>;
@@ -34,68 +54,87 @@ pub trait Container: Any {
 }
 
 pub trait Component: 'static {
-    const ID: ComponentId = ComponentId(const_fnv1a_hash::fnv1a_hash_str_64(Self::IDENT));
+    const ID: ComponentId = ComponentId::new(Self::IDENT);
     const IDENT: &'static str;
 
     type Container: Container;
 }
 
-type ComponentBox = Box<dyn Any>;
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy)]
-struct AnyFn(*const (), TypeId);
-impl AnyFn {
-    fn is<T: Any>(&self) -> bool {
-        TypeId::of::<T>() == self.1
-    }
-}
-type MethodFn<C, Args> = fn(<<C as ComponentRetrieve>::Containers as Container>::Mut<'_>, Args);
-type MethodCall<Args> = fn(&Method, &mut Components, Args);
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy)]
-pub struct Method {
-    method: AnyFn,
-    receiver: AnyFn,
-    components: &'static [ComponentId],
+pub trait StructuralMethod {
+
 }
-impl Method {
-    pub fn new<C: ComponentRetrieve + 'static, Args: 'static>(f: MethodFn<C, Args>) -> Self {
-        Self {
-            method: AnyFn(f as *const (), TypeId::of::<MethodFn<C, Args>>()),
-            receiver: AnyFn(Self::call::<C, Args> as *const (), TypeId::of::<Args>()),
-            components: C::IDS,
-        }
-    }
-    pub fn call<C: ComponentRetrieve + 'static, Args: 'static>(
-        &self,
-        components: &mut Components,
-        args: Args,
-    ) -> Result<(), ()> {
-        if self.method.is::<MethodFn<C, Args>>() {
-            return Err(());
-        }
-        let method: MethodFn<C, Args> = unsafe { std::mem::transmute(self.method.0) };
-        let Some(components) = C::retrieve_mut(components) else {
+
+pub trait Method {
+    const ID: MethodId = MethodId::new(Self::IDENT);
+    const IDENT: &'static str;
+
+    type Args;
+    type Components: ComponentRetrieve;
+
+    fn call(
+        components: <<Self::Components as ComponentRetrieve>::Containers as Container>::Mut<'_>,
+        args: Self::Args,
+    );
+    fn recv(components: &mut Components, args: Self::Args) -> Result<(), ()> {
+        let Some(components) = Self::Components::retrieve_mut(components) else {
             return Err(());
         };
-        (method)(components, args);
+        Self::call(components, args);
         Ok(())
-    }
-    pub fn recv<Args: 'static>(&self, components: &mut Components, args: Args) -> Result<(), ()> {
-        if self.method.is::<Args>() {
-            return Err(());
-        }
-        let receiver: MethodCall<Args> = unsafe { std::mem::transmute(self.receiver.0) };
-        (receiver)(self, components, args);
-        Ok(())
-    }
-    pub fn id(&self) -> MethodId {
-        MethodId(self.method.0)
     }
 }
 
+struct SignalBoard<Args: Clone> {
+    methods: IndexMap<MethodId, fn(&mut Components, Args) -> Result<(), ()>>,
+}
+impl<Args: Clone> SignalBoard<Args> {
+    fn insert<M: Method<Args = Args>>(&mut self) {
+        self.methods.insert(M::ID, M::recv);
+    }
+    fn call(&self, components: &mut Components, args: Args) -> Result<(), ()> {
+        for method in self.methods.values().copied() {
+            (method)(components, args.clone())?;
+        }
+        Ok(())
+    }
+}
+trait Signaling {
+    fn remove(&mut self, id: &MethodId);
+}
+impl<Args: Clone> Signaling for SignalBoard<Args> {
+    fn remove(&mut self, id: &MethodId) {
+        self.methods.shift_remove(id);
+    }
+}
+
+impl dyn Signaling {
+    unsafe fn downcast_signal<Args: Clone>(&self) -> &SignalBoard<Args> {
+        unsafe {
+            std::mem::transmute::<_, (*const SignalBoard<Args>, *const ())>(std::ptr::from_ref(
+                self,
+            ))
+            .0
+            .as_ref()
+            .unwrap()
+        }
+    }
+    unsafe fn downcast_signal_mut<Args: Clone>(&mut self) -> &mut SignalBoard<Args> {
+        unsafe {
+            std::mem::transmute::<_, (*mut SignalBoard<Args>, *const ())>(std::ptr::from_mut(self))
+                .0
+                .as_mut()
+                .unwrap()
+        }
+    }
+}
+
+type ComponentBox = Box<dyn Any>;
+type SignalBox = Box<dyn Signaling>;
+
 type Components = HashMap<ComponentId, ComponentBox>;
-type Signals = MultiMap<SignalId, Method>;
+type Signals = HashMap<SignalId, SignalBox>;
 type Connection = MultiMap<MethodId, SignalId>;
 type Dependency = MultiMap<ComponentId, MethodId>;
 
@@ -115,29 +154,48 @@ impl Group {
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
-    pub fn add_component<C: Component>(&mut self, new: Method, delete: Method) {
+    pub fn add_component<
+        C: Component,
+        N: Method<Args = Range<usize>>,
+        D: Method<Args = Range<usize>>,
+    >(
+        &mut self,
+    ) -> Result<(), ()> {
         self.components.insert(C::ID, Box::new(C::Container::new()));
-        new.recv(&mut self.components, 0..self.len);
-        self.connect(new, NEW);
-        self.connect(delete, DELETE);
+        if self.connect::<N>(NEW).is_ok() {
+            if self.connect::<D>(DELETE).is_ok() {
+                N::recv(&mut self.components, 0..self.len).unwrap();
+                return Ok(());
+            };
+            self.disconnect(&NEW.id, &N::ID).unwrap();
+        };
+        self.components.remove(&C::ID);
+        Err(())
     }
-    fn connect(&mut self, method: Method, signal: SignalId) -> Result<(), ()> {
-        for component in method.components {
+    fn connect<M: Method>(&mut self, signal: Signal<M::Args>) -> Result<(), ()>
+    where
+        <M as Method>::Args: Clone,
+    {
+        for component in M::Components::IDS {
             if !self.components.contains_key(component) {
                 return Err(());
             }
         }
-        for component in method.components.iter().copied() {
-            self.dependency.insert(component, method.id());
+        let Some(signalboard) = self.get_signal_mut(&signal) else {
+            return Err(());
+        };
+        signalboard.insert::<M>();
+        for component in M::Components::IDS.iter().copied() {
+            self.dependency.insert(component, M::ID);
         }
-        self.signals.insert(signal, method);
+        self.connection.insert(M::ID, signal.id);
         Ok(())
     }
     fn disconnect(&mut self, signal: &SignalId, method: &MethodId) -> Result<(), ()> {
-        let Some(signal) = self.signals.get_vec_mut(signal) else {
+        let Some(signal) = self.signals.get_mut(signal) else {
             return Err(());
         };
-        for _ in signal.extract_if(.., |m| &m.id() == method) {}
+        signal.remove(method);
         Ok(())
     }
     pub fn get_components<C: ComponentRetrieve>(
@@ -150,40 +208,52 @@ impl Group {
     ) -> Option<<C::Containers as Container>::Mut<'_>> {
         C::retrieve_mut(&mut self.components)
     }
+    fn get_signal_mut<Args: Clone>(
+        &mut self,
+        signal: &Signal<Args>,
+    ) -> Option<&mut SignalBoard<Args>> {
+        let signal = self.signals.get_mut(&signal.id)?;
+        let signal: &mut SignalBoard<Args> = unsafe { signal.downcast_signal_mut::<Args>() };
+        Some(signal)
+    }
     pub fn remove_component(&mut self, id: &ComponentId) -> Result<(), ()> {
         let Some(dependents) = self.dependency.remove(id) else {
-            return Err(())
+            return Err(());
         };
         for method in dependents {
             let Some(signals) = self.connection.remove(&method) else {
                 continue;
             };
             for signal in signals {
-                self.disconnect(&signal, &method);
+                self.disconnect(&signal, &method).unwrap();
             }
         }
         self.components.remove(id);
         Ok(())
     }
-    pub fn signal<Args: Clone + 'static>(&mut self, signal: &SignalId, args: Args) {
-        let Some(signal) = self.signals.get_vec(signal) else {
-            return;
+    pub fn signal<Args: Clone + 'static>(
+        &mut self,
+        signal: &Signal<Args>,
+        args: Args,
+    ) -> Result<(), ()> {
+        let Some(signal) = self.signals.get_mut(&signal.id) else {
+            return Err(());
         };
-        for method in signal {
-            method.recv(&mut self.components, args.clone());
-        }
+        let signal: &mut SignalBoard<Args> = unsafe { signal.downcast_signal_mut::<Args>() };
+        signal.call(&mut self.components, args.clone()).unwrap();
+        Ok(())
     }
     pub fn new(&mut self, num: usize) {
-        self.signal(&NEW, self.len..self.len + num);
+        self.signal(&NEW, self.len..self.len + num).unwrap();
         self.len += num;
     }
     pub fn delete(&mut self, range: Range<usize>) {
-        self.signal(&DELETE, range.clone());
+        self.signal(&DELETE, range.clone()).unwrap();
         self.len -= range.len();
     }
 }
 
-pub trait ComponentRetrieve: 'static {
+pub trait ComponentRetrieve {
     type Containers: Container;
     const IDS: &'static [ComponentId];
 

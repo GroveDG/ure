@@ -1,4 +1,5 @@
 use std::{
+	cell::OnceCell,
 	collections::HashMap,
 	marker::PhantomData,
 	sync::{
@@ -8,7 +9,7 @@ use std::{
 	},
 };
 
-use ure_data::group::{Component, ComponentBox, IndexSet};
+use ure_data::{Extract, Get, Method, One, component, method};
 use wgpu::{Surface, SurfaceTexture};
 use winit::{
 	application::ApplicationHandler,
@@ -23,140 +24,33 @@ pub mod input;
 
 pub type Input = Arc<input::Input>;
 
-pub struct Windows {
+pub struct WindowSource {
 	receiver: Receiver<Window>,
 	proxy: EventLoopProxy<Event>,
 }
-impl Windows {
+impl WindowSource {
 	pub fn new_window(&self, attrs: WindowAttributes) -> Arc<Window> {
 		self.proxy.send_event(Event::NewWindow(attrs)).unwrap();
 		Arc::new(self.receiver.recv().unwrap())
 	}
 }
-impl Component for Windows {
-	const IDENT: &'static str = "Windows";
 
-	type Container = Vec<Arc<Window>>;
-	type Dependencies = ();
+component!(WindowReceiver: One<WindowSource>);
+component!(Windows: Vec<Arc<Window>>);
+pub fn new_windows(receiver: WindowReceiver) {}
+component!(WindowIds: Vec<WindowId>);
+component!(WindowSizes: Vec<PhysicalSize<u32>>);
+component!(WindowExits: Vec<Arc<AtomicBool>>);
+component!(Surfaces: Vec<Surface<'static>>);
+component!(SurfaceTextures: Vec<Option<SurfaceTexture>>);
 
-	fn new(self) -> ure_data::group::ComponentBox {
-		ComponentBox::new::<Self>(
-			None,
-			move |c, range, _| {
-				for i in range {
-					c.push(self.new_window(WindowAttributes::default().with_title("URE")));
-				}
-			},
-			|c, range| {
-				for i in range.rev() {
-					c.swap_remove(i);
-				}
-			},
-		)
-	}
-}
-pub struct WindowIds;
-impl Component for WindowIds {
-	const IDENT: &'static str = "WindowIds";
-
-	type Container = IndexSet<WindowId>;
-	type Dependencies = Windows;
-
-	fn new(self) -> ure_data::group::ComponentBox {
-		ComponentBox::new::<Self>(
-			None,
-			|c, range, d| {
-				for i in range {
-					c.insert(d[i].id());
-				}
-			},
-			|c, range| {
-				for i in range {
-					c.swap_remove_index(i);
-				}
-			},
-		)
-	}
-}
-pub struct WindowSizes;
-impl Component for WindowSizes {
-	const IDENT: &'static str = "WindowIds";
-
-	type Container = Vec<PhysicalSize<u32>>;
-	type Dependencies = Windows;
-
-	fn new(self) -> ComponentBox {
-		ComponentBox::new::<Self>(
-			None,
-			|c, range, d| {
-				for i in range {
-					c.push(Default::default());
-				}
-			},
-			|c, range| {
-				for i in range {
-					c.swap_remove(i);
-				}
-			},
-		)
-	}
-}
-pub struct Surfaces;
-impl Component for Surfaces {
-	const IDENT: &'static str = "Surfaces";
-
-	type Container = Vec<wgpu::Surface<'static>>;
-	type Dependencies = Windows;
-
-	fn new(self) -> ure_data::group::ComponentBox {
-		ComponentBox::new::<Self>(
-			None,
-			|c, range, d| {
-				for i in range {
-					c.push(GPU.instance.create_surface(d[i].clone()).unwrap());
-				}
-			},
-			|c, range| {
-				for i in range {
-					c.swap_remove(i);
-				}
-			},
-		)
-	}
-}
-
-pub struct WindowClose {
-	receiver: Receiver<Arc<AtomicBool>>,
-}
-impl Component for WindowClose {
-	const IDENT: &'static str = "WindowClosed";
-
-	type Container = Vec<Arc<AtomicBool>>;
-	type Dependencies = Windows;
-
-	fn new(self) -> ComponentBox {
-		ComponentBox::new::<Self>(
-			None,
-			move |c, range, d| {
-				for i in range {
-					c.push(self.receiver.recv().unwrap());
-				}
-			},
-			|c, range| {
-				for i in range {
-					c.swap_remove(i);
-				}
-			},
-		)
-	}
-}
-
+const RECONFIGURE_SURFACES: Method = method!(
+	reconfigure_surfaces,
+	get (Windows, WindowSizes, Surfaces, SurfaceTextures)
+);
 pub fn reconfigure_surfaces(
-	windows: &[Arc<Window>],
-	sizes: &mut [PhysicalSize<u32>],
-	surfaces: &[Surface<'static>],
-) -> Vec<SurfaceTexture> {
-	let mut textures = Vec::new();
+	(windows, sizes, surfaces, textures): Get<(Windows, WindowSizes, Surfaces, SurfaceTextures)>,
+) {
 	for i in 0..surfaces.len() {
 		let size = windows[i].inner_size();
 		if sizes[i] != size {
@@ -168,9 +62,8 @@ pub fn reconfigure_surfaces(
 					.unwrap(),
 			);
 		}
-		textures.push(surfaces[i].get_current_texture().unwrap());
+		textures[i] = surfaces[i].get_current_texture().ok();
 	}
-	textures
 }
 
 #[derive(Debug, Clone)]
@@ -180,7 +73,7 @@ pub enum Event {
 }
 
 pub trait Game: 'static {
-	fn new(app: AppProxy, windows: Windows, window_close: WindowClose) -> Self;
+	fn new(app: AppProxy, windows: Windows, window_close: WindowExits) -> Self;
 	fn run(self);
 }
 
@@ -227,11 +120,11 @@ impl<G: Game> ApplicationHandler<Event> for App<G> {
 			input: input.clone(),
 		};
 		let windows = Windows {
-			receiver: window_recv,
-			proxy: proxy.clone(),
+			// receiver: window_recv,
+			// proxy: proxy.clone(),
 		};
-		let window_close = WindowClose {
-			receiver: window_close_recv,
+		let window_close = WindowExits {
+			// receiver: window_close_recv,
 		};
 
 		self.game = Some(std::thread::spawn(move || {

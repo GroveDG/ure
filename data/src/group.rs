@@ -89,10 +89,10 @@ macro_rules! method {
 	};
 	($func:ident $(, extract $extract:ty)? $(, get $get:ty)? $(, args $args:ty)? $(,)?) => {
 		|components, args| {
-			$( let extract = <$extract as $crate::ComponentRetrieve>::extract(components).unwrap(); )?;
+			$( let mut extract = <$extract as $crate::ComponentRetrieve>::extract(components).unwrap(); )?;
 			$( let get = <$get as $crate::ComponentRetrieve>::retrieve_mut(components).unwrap(); )?
 			let ret = ($func)(
-				$($crate::method!(CAPTURE, extract, $extract), )?
+				$(&mut $crate::method!(CAPTURE, extract, $extract), )?
 				$($crate::method!(CAPTURE, get, $get), )?
 				$($crate::method!(CAPTURE, args, $args), )?
 			);

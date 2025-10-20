@@ -1,9 +1,4 @@
-use std::{
-	any::Any,
-	collections::HashMap,
-	marker::PhantomData,
-	ops::{Deref, DerefMut, Range},
-};
+use std::{any::Any, cell::UnsafeCell, collections::HashMap, marker::PhantomData, ops::Range};
 
 pub use bitvec::{slice::BitSlice, vec::BitVec};
 use indexmap::IndexMap;
@@ -12,551 +7,558 @@ use multimap::MultiMap;
 pub use one_or_many::OneOrMany;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ComponentId(u64);
-impl ComponentId {
-	const fn new(ident: &str) -> Self {
-		Self(const_fnv1a_hash::fnv1a_hash_str_64(ident))
-	}
+pub struct ComponentIdInner(u64);
+impl ComponentIdInner {
+    const fn new(ident: &str) -> Self {
+        Self(const_fnv1a_hash::fnv1a_hash_str_64(ident))
+    }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MethodId(u64);
-impl MethodId {
-	const fn new(ident: &str) -> Self {
-		Self(const_fnv1a_hash::fnv1a_hash_str_64(ident))
-	}
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct ComponentId<C: Container> {
+    inner: ComponentIdInner,
+    _marker: PhantomData<C>,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SignalId(u64);
-impl SignalId {
-	const fn new(ident: &str) -> Self {
-		Self(const_fnv1a_hash::fnv1a_hash_str_64(ident))
-	}
+impl<C: Container> ComponentId<C> {
+    pub const fn new(ident: &str) -> Self {
+        Self {
+            inner: ComponentIdInner::new(ident),
+            _marker: PhantomData,
+        }
+    }
+    pub const fn inner(&self) -> ComponentIdInner {
+        self.inner
+    }
+    pub unsafe fn get_container(&self, components: &Components) -> Option<&C> {
+        unsafe { components.get(&self.inner)?.get().as_mut() }?.downcast_ref::<C>()
+    }
+    pub unsafe fn get_container_mut(&self, components: &Components) -> Option<&mut C> {
+        unsafe { components.get(&self.inner)?.get().as_mut() }?.downcast_mut::<C>()
+    }
+    pub unsafe fn get(&self, components: &Components) -> Option<C::Ref<'_>> {
+        Some(
+            unsafe { components.get(&self.inner)?.get().as_mut() }?
+                .downcast_ref::<C>()?
+                .as_ref(),
+        )
+    }
+    pub unsafe fn get_mut(&self, components: &Components) -> Option<C::Mut<'_>> {
+        Some(
+            unsafe { components.get(&self.inner)?.get().as_mut() }?
+                .downcast_mut::<C>()?
+                .as_mut(),
+        )
+    }
 }
-
-pub struct Signal<Args> {
-	id: SignalId,
-	_marker: PhantomData<Args>,
+impl<C: Container> Clone for ComponentId<C> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            _marker: self._marker.clone(),
+        }
+    }
 }
-impl<Args> Signal<Args> {
-	pub const fn new(ident: &'static str) -> Self {
-		Self {
-			id: SignalId::new(ident),
-			_marker: PhantomData,
-		}
-	}
-}
-
-pub const NEW: Signal<Range<usize>> = Signal::new("New");
-pub const DELETE: Signal<Range<usize>> = Signal::new("Delete");
-
-pub trait Container: Any {
-	type Ref<'a>;
-	type Mut<'a>;
-	type AsRef<'a>;
-	type AsMut<'a>;
-
-	fn new() -> Self;
-	fn container_ref(&self) -> Self::Ref<'_>;
-	fn container_mut(&mut self) -> Self::Mut<'_>;
-}
-
-pub trait Component: 'static {
-	const ID: ComponentId = ComponentId::new(Self::IDENT);
-	const IDENT: &'static str;
-
-	type Container: Container;
-}
-
+impl<C: Container> Copy for ComponentId<C> {}
 #[macro_export]
 macro_rules! component {
-	($name:ident : $container:ty) => {
-		struct $name;
-		impl $crate::Component for $name {
-			const IDENT: &'static str = stringify!($name);
-			type Container = $container;
-		}
-	};
+    ($v:vis $name:ident : $t:ty) => {
+$v const $name : $crate::ComponentId<$t> = $crate::ComponentId::new(stringify!($name));
+    };
 }
 
-pub type Method<Args = (), Return = ()> = fn(&mut Components, Args) -> Return;
-pub type Get<'a, C> = <<C as ComponentRetrieve>::Containers as Container>::Mut<'a>;
-pub type Extract<'a, C> = <<C as ComponentRetrieve>::Containers as Container>::AsMut<'a>;
+type MethodFn<Args = (), Return = ()> = fn(&mut Components, Args) -> Return;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MethodIdInner(u64);
+impl MethodIdInner {
+    const fn new(ident: &str) -> Self {
+        Self(const_fnv1a_hash::fnv1a_hash_str_64(ident))
+    }
+}
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct MethodId<Args = (), Return = ()> {
+    inner: MethodIdInner,
+    _marker: PhantomData<MethodFn<Args, Return>>,
+}
+impl<Args, Return> MethodId<Args, Return> {
+    pub const fn new(ident: &str) -> Self {
+        Self {
+            inner: MethodIdInner::new(ident),
+            _marker: PhantomData,
+        }
+    }
+    pub const fn inner(&self) -> MethodIdInner {
+        self.inner
+    }
+}
+impl<Args, Return> Clone for MethodId<Args, Return> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            _marker: self._marker.clone(),
+        }
+    }
+}
+impl<Args, Return> Copy for MethodId<Args, Return> {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SignalIdInner(u64);
+impl SignalIdInner {
+    const fn new(ident: &str) -> Self {
+        Self(const_fnv1a_hash::fnv1a_hash_str_64(ident))
+    }
+}
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct SignalId<Args> {
+    inner: SignalIdInner,
+    _marker: PhantomData<MethodFn<Args>>,
+}
+impl<Args> SignalId<Args> {
+    const fn new(ident: &str) -> Self {
+        Self {
+            inner: SignalIdInner::new(ident),
+            _marker: PhantomData,
+        }
+    }
+    pub const fn inner(&self) -> SignalIdInner {
+        self.inner
+    }
+}
+impl<Args> Clone for SignalId<Args> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            _marker: self._marker.clone(),
+        }
+    }
+}
+impl<Args> Copy for SignalId<Args> {}
+#[macro_export]
+macro_rules! signal {
+    ($v:vis $name:ident : $t:ty) => {
+$v const $name : $crate::SignalId<$t> = $crate::SignalId::new(stringify!($name));
+    };
+}
+
+signal!(NEW: Range<usize>);
+signal!(DELETE: Range<usize>);
+
+pub struct ComponentStruct<C: Container> {
+    pub id: ComponentId<C>,
+    pub container: C,
+    pub len: usize,
+    pub new: Method<Range<usize>>,
+    pub delete: Method<Range<usize>>,
+}
+impl<C: Container + Default> ComponentStruct<C> {
+    pub fn new(
+        id: ComponentId<C>,
+        new: Method<Range<usize>>,
+        delete: Method<Range<usize>>,
+    ) -> Self {
+        Self {
+            id,
+            container: Default::default(),
+            len: 0,
+            new,
+            delete,
+        }
+    }
+}
+pub struct Method<Args = (), Return = ()> {
+    id: MethodId<Args, Return>,
+    func: MethodFn<Args, Return>,
+    dependencies: &'static [ComponentIdInner],
+}
+impl<Args, Return> Method<Args, Return> {
+    pub const fn new(
+        ident: &str,
+        func: MethodFn<Args, Return>,
+        dependencies: &'static [ComponentIdInner],
+    ) -> Self {
+        Self {
+            id: MethodId::new(ident),
+            func,
+            dependencies,
+        }
+    }
+}
+#[macro_export]
+macro_rules! method_custom {
+    (
+        ( $($extract_name:ident : $extract:ident),* $(,)? )
+        ( $($get_name:ident : $get:ident),* $(,)? )
+        $args_name:ident
+        $f:block
+    ) => {
+        $crate::Method::new(
+            stringify!($name),
+            |components, $args_name| {
+                unsafe{
+                $(
+                let $extract_name = $extract.get_container_mut(components).unwrap();
+                )*
+                $(
+                let $get_name = $get.get_mut(components).unwrap();
+                )*
+                $f
+                }
+            },
+            &[
+                $( $extract.inner(), )*
+                $( $get.inner(), )*
+            ]
+        )
+    };
+}
 #[macro_export]
 macro_rules! method {
-	(CAPTURE, $i:ident, $t:ty) => {
-		$i
-	};
-	($func:ident $(, extract $extract:ty)? $(, get $get:ty)? $(, args $args:ty)? $(,)?) => {
-		|components, args| {
-			$( let mut extract = <$extract as $crate::ComponentRetrieve>::extract(components).unwrap(); )?;
-			$( let get = <$get as $crate::ComponentRetrieve>::retrieve_mut(components).unwrap(); )?
-			let ret = ($func)(
-				$(&mut $crate::method!(CAPTURE, extract, $extract), )?
-				$($crate::method!(CAPTURE, get, $get), )?
-				$($crate::method!(CAPTURE, args, $args), )?
-			);
-			$( <$extract as $crate::ComponentRetrieve>::insert(components, extract); )?
-			ret
-		}
-	};
+    ($v:vis $func:ident
+        ( $($extract:ident),* $(,)? )
+        ( $($get:ident),* $(,)? )
+        $( $args:ty $(,)? )?
+    ) => {
+        $crate::mident::mident!{
+        $v const #upcase $func: $crate::Method<($($args)?)> = $crate::method_custom!(
+            ( $(#downcase $extract : $extract),* ) ( $(#downcase $get : $get),* ) args {
+                ($func)(
+                    $( #downcase $extract, )*
+                    $( #downcase $get, )*
+                    $( args as $args )?
+                )
+            }
+        );
+        }
+    };
 }
-
 #[macro_export]
-macro_rules! mut_components {
-	(
-		$fn_name:ident $components:ident
-		($($component_name:ident : $component_type:ty,)*)
-		($($arg_name:ident : $arg_type:ty),*)
-	) => {
-		let ($($component_name),*) = <($($component_type,)*)>::retrieve_mut($components).unwrap();
-		($fn_name)($($component_name,)* $arg_name)
-	};
+macro_rules! new {
+    (
+        $v:vis
+        $func:ident
+        $component:ident
+        ( $($get:ident),* $(,)? )
+    ) => {
+        $crate::mident::mident!(
+        $v const #upcase $func: $crate::Method<(std::ops::Range<usize>)> = $crate::method_custom!(
+            ( #downcase $component : $component ) ( $(#downcase $get : $get),* ) range {
+                for i in range {
+                    ($func)(
+                        #downcase $component,
+                        $(#downcase $get, )*
+                        i
+                    )
+                }
+            }
+        );
+        );
+    };
 }
 
-#[derive(Debug)]
-struct MethodFn<Args> {
-	func: Method<Args>,
-	id: MethodId,
-	dependencies: &'static [ComponentId],
+#[derive(Debug, Default)]
+pub struct Signal<Args: Clone> {
+    methods: IndexMap<MethodIdInner, MethodFn<Args>>,
 }
-impl<Args> MethodFn<Args> {
-	pub const fn new(
-		func: Method<Args>,
-		ident: &'static str,
-		dependencies: &'static [ComponentId],
-	) -> Self {
-		MethodFn {
-			func,
-			id: MethodId::new(ident),
-			dependencies,
-		}
-	}
-}
-impl<Args> Clone for MethodFn<Args> {
-	fn clone(&self) -> Self {
-		Self {
-			func: self.func,
-			id: self.id,
-			dependencies: self.dependencies,
-		}
-	}
-}
-impl<Args> Copy for MethodFn<Args> {}
-
-struct SignalBoard<Args: Clone> {
-	methods: IndexMap<MethodId, Method<Args>>,
-}
-impl<Args: Clone> SignalBoard<Args> {
-	fn insert(&mut self, method: MethodFn<Args>) {
-		self.methods.insert(method.id, method.func);
-	}
-	fn call(&self, components: &mut Components, args: Args) -> Result<(), ()> {
-		for method in self.methods.values().copied() {
-			(method)(components, args.clone());
-		}
-		Ok(())
-	}
+impl<Args: Clone> Signal<Args> {
+    pub fn insert(&mut self, id: MethodId<Args>, method: MethodFn<Args>) {
+        self.methods.insert(id.inner, method);
+    }
+    pub fn call(&self, components: &mut Components, args: Args) {
+        for method in self.methods.values().copied() {
+            (method)(components, args.clone());
+        }
+    }
 }
 trait Signaling {
-	fn remove(&mut self, id: &MethodId);
+    fn disconnect(&mut self, id: &MethodIdInner);
 }
-impl<Args: Clone> Signaling for SignalBoard<Args> {
-	fn remove(&mut self, id: &MethodId) {
-		self.methods.shift_remove(id);
-	}
-}
-
-impl dyn Signaling {
-	unsafe fn downcast_signal<Args: Clone>(&self) -> &SignalBoard<Args> {
-		unsafe {
-			std::mem::transmute::<_, (*const SignalBoard<Args>, *const ())>(std::ptr::from_ref(
-				self,
-			))
-			.0
-			.as_ref()
-			.unwrap()
-		}
-	}
-	unsafe fn downcast_signal_mut<Args: Clone>(&mut self) -> &mut SignalBoard<Args> {
-		unsafe {
-			std::mem::transmute::<_, (*mut SignalBoard<Args>, *const ())>(std::ptr::from_mut(self))
-				.0
-				.as_mut()
-				.unwrap()
-		}
-	}
+impl<Args: Clone> Signaling for Signal<Args> {
+    fn disconnect(&mut self, id: &MethodIdInner) {
+        self.methods.shift_remove(id);
+    }
 }
 
 type ComponentBox = Box<dyn Any>;
 type SignalBox = Box<dyn Signaling>;
 
-pub type Components = HashMap<ComponentId, ComponentBox>;
-type Signals = HashMap<SignalId, SignalBox>;
-type Connection = MultiMap<MethodId, SignalId>;
-type Dependency = MultiMap<ComponentId, MethodId>;
+pub type Components = HashMap<ComponentIdInner, UnsafeCell<ComponentBox>>;
+#[derive(Default)]
+struct Signals {
+    inner: HashMap<SignalIdInner, SignalBox>,
+}
+impl Signals {
+    fn get(&self, id: &SignalIdInner) -> Option<&dyn Signaling> {
+        Some(self.inner.get(id)?.as_ref())
+    }
+    fn get_mut(&mut self, id: &SignalIdInner) -> Option<&mut dyn Signaling> {
+        Some(self.inner.get_mut(id)?.as_mut())
+    }
+    fn get_signal<Args: Clone>(&self, id: &SignalId<Args>) -> Option<&Signal<Args>> {
+        let signal = self.inner.get(&id.inner)?.as_ref();
+        unsafe { (signal as *const dyn Signaling as *const Signal<Args>).as_ref() }
+    }
+    fn get_signal_mut<Args: Clone>(&mut self, id: &SignalId<Args>) -> Option<&mut Signal<Args>> {
+        let signal = self.inner.get_mut(&id.inner)?.as_mut();
+        unsafe { (signal as *mut dyn Signaling as *mut Signal<Args>).as_mut() }
+    }
+}
+type Connection = MultiMap<MethodIdInner, SignalIdInner>;
+type Dependency = MultiMap<ComponentIdInner, MethodIdInner>;
 
 #[derive(Default)]
 pub struct Group {
-	len: usize,
-	components: Components,
-	signals: Signals,
-	connection: Connection,
-	dependency: Dependency,
+    len: usize,
+    components: Components,
+    signals: Signals,
+    connection: Connection,
+    dependency: Dependency,
 }
 
 impl Group {
-	pub fn len(&self) -> usize {
-		self.len
-	}
-	pub fn is_empty(&self) -> bool {
-		self.len == 0
-	}
-	pub fn add_component<C: Component>(
-		&mut self,
-		new: MethodFn<Range<usize>>,
-		delete: MethodFn<Range<usize>>,
-	) -> Result<(), ()> {
-		self.components.insert(C::ID, Box::new(C::Container::new()));
-		if self.connect(NEW, new).is_ok() {
-			if self.connect(DELETE, delete).is_ok() {
-				(new.func)(&mut self.components, 0..self.len);
-				return Ok(());
-			};
-			self.disconnect(&NEW.id, &new.id).unwrap();
-		};
-		self.components.remove(&C::ID);
-		Err(())
-	}
-	fn connect<Args: Clone>(
-		&mut self,
-		signal: Signal<Args>,
-		method: MethodFn<Args>,
-	) -> Result<(), ()> {
-		for component in method.dependencies {
-			if !self.components.contains_key(component) {
-				return Err(());
-			}
-		}
-		let Some(signalboard) = self.get_signal_mut(&signal) else {
-			return Err(());
-		};
-		signalboard.insert(method);
-		for component in method.dependencies.iter().copied() {
-			self.dependency.insert(component, method.id);
-		}
-		self.connection.insert(method.id, signal.id);
-		Ok(())
-	}
-	fn disconnect(&mut self, signal: &SignalId, method: &MethodId) -> Result<(), ()> {
-		let Some(signal) = self.signals.get_mut(signal) else {
-			return Err(());
-		};
-		signal.remove(method);
-		Ok(())
-	}
-	pub fn get_components<C: ComponentRetrieve>(
-		&self,
-	) -> Option<<C::Containers as Container>::Ref<'_>> {
-		C::retrieve(&self.components)
-	}
-	pub fn get_components_mut<C: ComponentRetrieve>(
-		&mut self,
-	) -> Option<<C::Containers as Container>::Mut<'_>> {
-		C::retrieve_mut(&mut self.components)
-	}
-	fn get_signal_mut<Args: Clone>(
-		&mut self,
-		signal: &Signal<Args>,
-	) -> Option<&mut SignalBoard<Args>> {
-		let signal = self.signals.get_mut(&signal.id)?;
-		let signal: &mut SignalBoard<Args> = unsafe { signal.downcast_signal_mut::<Args>() };
-		Some(signal)
-	}
-	pub fn remove_component(&mut self, id: &ComponentId) -> Result<(), ()> {
-		let Some(dependents) = self.dependency.remove(id) else {
-			return Err(());
-		};
-		for method in dependents {
-			let Some(signals) = self.connection.remove(&method) else {
-				continue;
-			};
-			for signal in signals {
-				self.disconnect(&signal, &method).unwrap();
-			}
-		}
-		self.components.remove(id);
-		Ok(())
-	}
-	pub fn signal<Args: Clone + 'static>(
-		&mut self,
-		signal: &Signal<Args>,
-		args: Args,
-	) -> Result<(), ()> {
-		let Some(signal) = self.signals.get_mut(&signal.id) else {
-			return Err(());
-		};
-		let signal: &mut SignalBoard<Args> = unsafe { signal.downcast_signal_mut::<Args>() };
-		signal.call(&mut self.components, args.clone()).unwrap();
-		Ok(())
-	}
-	pub fn new(&mut self, num: usize) {
-		self.signal(&NEW, self.len..self.len + num).unwrap();
-		self.len += num;
-	}
-	pub fn delete(&mut self, range: Range<usize>) {
-		self.signal(&DELETE, range.clone()).unwrap();
-		self.len -= range.len();
-	}
+    pub fn add_component<C: Container>(&mut self, component: ComponentStruct<C>) -> Result<(), ()> {
+        let ComponentStruct::<C> {
+            id,
+            container,
+            len,
+            new,
+            delete,
+        } = component;
+
+        let (new_id, delete_id) = (new.id, delete.id);
+        let new_func = new.func;
+
+        self.components
+            .insert(id.inner, UnsafeCell::new(Box::new(container)));
+        let new_ok = self.connect(NEW, new).is_ok();
+        let delete_ok = self.connect(DELETE, delete).is_ok();
+        if new_ok && delete_ok {
+            (new_func)(&mut self.components, len..self.len);
+            return Ok(());
+        }
+        if !new_ok {
+            self.disconnect(&NEW.inner, &new_id.inner).unwrap();
+        }
+        if !delete_ok {
+            self.disconnect(&DELETE.inner, &delete_id.inner).unwrap();
+        }
+        self.components.remove(&id.inner);
+        Err(())
+    }
+    pub fn remove_component<C: Container>(&mut self, id: &ComponentId<C>) {
+        self.components.remove(&id.inner);
+
+        for method in self.dependency.remove(&id.inner).unwrap() {
+            for signal in self.connection.remove(&method).unwrap() {
+                self.signals.get_mut(&signal).unwrap().disconnect(&method);
+            }
+        }
+    }
+    fn connect<Args: Clone>(
+        &mut self,
+        signal_id: SignalId<Args>,
+        method: Method<Args>,
+    ) -> Result<(), ()> {
+        let Method::<Args> {
+            id,
+            func,
+            dependencies,
+        } = method;
+
+        for component in dependencies {
+            if !self.components.contains_key(component) {
+                return Err(());
+            }
+        }
+        let Some(signal) = self.signals.get_signal_mut(&signal_id) else {
+            return Err(());
+        };
+        signal.insert(id, func);
+
+        for component in method.dependencies.iter().copied() {
+            self.dependency.insert(component, id.inner);
+        }
+        self.connection.insert(id.inner, signal_id.inner);
+
+        Ok(())
+    }
+    fn disconnect(&mut self, signal: &SignalIdInner, method: &MethodIdInner) -> Result<(), ()> {
+        let Some(signal) = self.signals.get_mut(signal) else {
+            return Err(());
+        };
+        signal.disconnect(method);
+        Ok(())
+    }
+    pub fn call_signal<Args: Clone>(&mut self, id: &SignalId<Args>, args: Args) -> Result<(), ()> {
+        let Some(signal) = self.signals.get_signal(id) else {
+            return Err(());
+        };
+        signal.call(&mut self.components, args);
+        Ok(())
+    }
+    pub unsafe fn get_component<C: Container>(
+        &self,
+        component: ComponentId<C>,
+    ) -> Option<C::Ref<'_>> {
+        Some(unsafe {
+            self.components
+                .get(&component.inner)?
+                .get()
+                .as_ref()?
+                .downcast_ref::<C>()?
+                .as_ref()
+        })
+    }
+    pub unsafe fn get_component_mut<C: Container>(
+        &self,
+        component: ComponentId<C>,
+    ) -> Option<C::Mut<'_>> {
+        Some(unsafe {
+            self.components
+                .get(&component.inner)?
+                .get()
+                .as_mut()?
+                .downcast_mut::<C>()?
+                .as_mut()
+        })
+    }
+    pub unsafe fn get_container<C: Container>(
+        &self,
+        component: ComponentId<C>,
+    ) -> Option<C::Ref<'_>> {
+        Some(unsafe {
+            self.components
+                .get(&component.inner)?
+                .get()
+                .as_ref()?
+                .downcast_ref::<C>()?
+                .as_ref()
+        })
+    }
+    pub unsafe fn get_container_mut<C: Container>(
+        &self,
+        component: ComponentId<C>,
+    ) -> Option<C::Mut<'_>> {
+        Some(unsafe {
+            self.components
+                .get(&component.inner)?
+                .get()
+                .as_mut()?
+                .downcast_mut::<C>()?
+                .as_mut()
+        })
+    }
+    pub fn len(&self) -> usize {
+        self.len
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
 }
 
-pub trait ComponentRetrieve {
-	type Containers: Container;
-	type BoxedContainers;
-	const IDS: &'static [ComponentId];
+pub trait Container: Any {
+    type Ref<'a>;
+    type Mut<'a>;
 
-	fn retrieve(components: &Components) -> Option<<Self::Containers as Container>::Ref<'_>>;
-	fn retrieve_mut(
-		components: &mut Components,
-	) -> Option<<Self::Containers as Container>::Mut<'_>>;
-	fn extract(components: &mut Components) -> Option<Self::BoxedContainers>;
-	fn insert(components: &mut Components, containers: Self::BoxedContainers);
+    fn as_ref(&self) -> Self::Ref<'_>;
+    fn as_mut(&mut self) -> Self::Mut<'_>;
+    fn delete(&mut self, range: Range<usize>);
 }
-
-impl ComponentRetrieve for () {
-	type Containers = ();
-	type BoxedContainers = ();
-	const IDS: &'static [ComponentId] = &[];
-	fn retrieve(_: &Components) -> Option<<Self::Containers as Container>::Ref<'_>> {
-		Some(())
-	}
-	fn retrieve_mut(_: &mut Components) -> Option<<Self::Containers as Container>::Mut<'_>> {
-		Some(())
-	}
-	fn extract(_: &mut Components) -> Option<Self::BoxedContainers> {
-		Some(())
-	}
-	fn insert(_: &mut Components, _: Self::BoxedContainers) {}
-}
-impl<C: Component> ComponentRetrieve for C {
-	type Containers = C::Container;
-	type BoxedContainers = Box<Self::Containers>;
-	const IDS: &'static [ComponentId] = &[C::ID];
-
-	fn retrieve(components: &Components) -> Option<<Self::Containers as Container>::Ref<'_>> {
-		Some(
-			components
-				.get(&C::ID)?
-				.downcast_ref::<C::Container>()?
-				.container_ref(),
-		)
-	}
-	fn retrieve_mut(
-		components: &mut Components,
-	) -> Option<<Self::Containers as Container>::Mut<'_>> {
-		Some(
-			components
-				.get_mut(&C::ID)?
-				.downcast_mut::<C::Container>()?
-				.container_mut(),
-		)
-	}
-	fn extract(components: &mut Components) -> Option<Box<Self::Containers>> {
-		components.remove(&C::ID)?.downcast().ok()
-	}
-	
-	fn insert(components: &mut Components, containers: Box<Self::Containers>) {
-		components.insert(C::ID, containers);
-	}
-}
-
 impl Container for () {
-	type Ref<'a> = ();
-	type Mut<'a> = ();
-	type AsRef<'a> = ();
-	type AsMut<'a> = ();
+    type Ref<'a> = ();
+    type Mut<'a> = ();
 
-	fn new() -> Self {}
-	fn container_ref(&self) -> Self::Ref<'_> {}
-	fn container_mut(&mut self) -> Self::Mut<'_> {}
+    fn as_ref(&self) -> Self::Ref<'_> {}
+    fn as_mut(&mut self) -> Self::Mut<'_> {}
+    fn delete(&mut self, _: Range<usize>) {}
 }
-pub struct One<T: 'static>(pub Option<T>);
+#[derive(Debug, Default)]
+pub struct One<T: 'static>(pub T);
 impl<T: 'static> Container for One<T> {
-	type Ref<'a> = &'a T;
-	type Mut<'a> = &'a mut T;
-	type AsRef<'a> = &'a One<T>;
-	type AsMut<'a> = &'a mut One<T>;
+    type Ref<'a> = &'a T;
+    type Mut<'a> = &'a mut T;
 
-	fn new() -> Self {
-		One(None)
-	}
-	fn container_ref(&self) -> Self::Ref<'_> {
-		self.0.as_ref().unwrap()
-	}
-	fn container_mut(&mut self) -> Self::Mut<'_> {
-		self.0.as_mut().unwrap()
-	}
+    fn as_ref(&self) -> Self::Ref<'_> {
+        &self.0
+    }
+    fn as_mut(&mut self) -> Self::Mut<'_> {
+        &mut self.0
+    }
+    fn delete(&mut self, _: Range<usize>) {}
 }
 impl<T: 'static> Container for Option<T> {
-	type Ref<'a> = Option<&'a T>;
-	type Mut<'a> = Option<&'a mut T>;
-	type AsRef<'a> = &'a Option<T>;
-	type AsMut<'a> = &'a mut Option<T>;
+    type Ref<'a> = Option<&'a T>;
+    type Mut<'a> = Option<&'a mut T>;
 
-	fn new() -> Self {
-		None
-	}
-	fn container_ref(&self) -> Self::Ref<'_> {
-		self.as_ref()
-	}
-	fn container_mut(&mut self) -> Self::Mut<'_> {
-		self.as_mut()
-	}
+    fn as_ref(&self) -> Self::Ref<'_> {
+        self.as_ref()
+    }
+    fn as_mut(&mut self) -> Self::Mut<'_> {
+        self.as_mut()
+    }
+    fn delete(&mut self, _: Range<usize>) {}
 }
 impl<T: 'static> Container for Vec<T> {
-	type Ref<'a> = &'a [T];
-	type Mut<'a> = &'a mut [T];
-	type AsRef<'a> = &'a Vec<T>;
-	type AsMut<'a> = &'a mut Vec<T>;
+    type Ref<'a> = &'a [T];
+    type Mut<'a> = &'a mut [T];
 
-	fn new() -> Self {
-		Vec::new()
-	}
-	fn container_ref(&self) -> Self::Ref<'_> {
-		self
-	}
-	fn container_mut(&mut self) -> Self::Mut<'_> {
-		self
-	}
+    fn as_ref(&self) -> Self::Ref<'_> {
+        self
+    }
+    fn as_mut(&mut self) -> Self::Mut<'_> {
+        self
+    }
+    fn delete(&mut self, range: Range<usize>) {
+        for i in range {
+            self.swap_remove(i);
+        }
+    }
 }
 impl<T: 'static> Container for IndexSet<T> {
-	type Ref<'a> = &'a IndexSet<T>; // TODO: prevent structural modifications
-	type Mut<'a> = &'a mut IndexSet<T>;
-	type AsRef<'a> = &'a IndexSet<T>;
-	type AsMut<'a> = &'a mut IndexSet<T>;
+    type Ref<'a> = &'a IndexSet<T>; // TODO: prevent structural modifications
+    type Mut<'a> = &'a mut IndexSet<T>;
 
-	fn new() -> Self {
-		IndexSet::new()
-	}
-	fn container_ref(&self) -> Self::Ref<'_> {
-		self
-	}
-	fn container_mut(&mut self) -> Self::Mut<'_> {
-		self
-	}
+    fn as_ref(&self) -> Self::Ref<'_> {
+        self
+    }
+    fn as_mut(&mut self) -> Self::Mut<'_> {
+        self
+    }
+    fn delete(&mut self, range: Range<usize>) {
+        for i in range {
+            self.swap_remove_index(i);
+        }
+    }
 }
 impl<T: 'static> Container for OneOrMany<T> {
-	type Ref<'a> = &'a [T];
-	type Mut<'a> = &'a mut [T];
-	type AsRef<'a> = &'a OneOrMany<T>;
-	type AsMut<'a> = &'a mut OneOrMany<T>;
+    type Ref<'a> = &'a [T];
+    type Mut<'a> = &'a mut [T];
 
-	fn new() -> Self {
-		OneOrMany::None
-	}
-	fn container_ref(&self) -> Self::Ref<'_> {
-		self.as_slice()
-	}
-	fn container_mut(&mut self) -> Self::Mut<'_> {
-		self.as_mut_slice()
-	}
+    fn as_ref(&self) -> Self::Ref<'_> {
+        self.as_slice()
+    }
+    fn as_mut(&mut self) -> Self::Mut<'_> {
+        self.as_mut_slice()
+    }
+    fn delete(&mut self, range: Range<usize>) {
+        if let OneOrMany::Many(items) = self {
+            for i in range {
+                items.swap_remove(i);
+            }
+        }
+    }
 }
 impl Container for BitVec {
-	type Ref<'a> = &'a BitSlice;
-	type Mut<'a> = &'a mut BitSlice;
-	type AsRef<'a> = &'a BitVec;
-	type AsMut<'a> = &'a mut BitVec;
+    type Ref<'a> = &'a BitSlice;
+    type Mut<'a> = &'a mut BitSlice;
 
-	fn new() -> Self {
-		BitVec::new()
-	}
-	fn container_ref(&self) -> Self::Ref<'_> {
-		self
-	}
-	fn container_mut(&mut self) -> Self::Mut<'_> {
-		self
-	}
+    fn as_ref(&self) -> Self::Ref<'_> {
+        self
+    }
+    fn as_mut(&mut self) -> Self::Mut<'_> {
+        self
+    }
+    fn delete(&mut self, range: Range<usize>) {
+        for i in range {
+            self.swap_remove(i);
+        }
+    }
 }
 // GPU Buffer container defined in the URE GPU crate.
-
-macro_rules! container_tuples {
-	($($T:ident),*) => {
-#[allow(non_snake_case)]
-impl<$($T: Container),*> Container for ($($T),*) {
-	type Ref<'a> = ($($T::Ref<'a>),*);
-	type Mut<'a> = ($($T::Mut<'a>),*);
-	type AsRef<'a> = ($($T::AsRef<'a>),*);
-	type AsMut<'a> = ($($T::AsMut<'a>),*);
-
-	fn new() -> Self {
-		panic!("Component tuples are invalid containers.")
-	}
-	fn container_ref(&self) -> Self::Ref<'_> {
-		let ($($T),*) = self;
-		($($T.container_ref()),*)
-	}
-	fn container_mut(&mut self) -> Self::Mut<'_> {
-		let ($($T),*) = self;
-		($($T.container_mut()),*)
-	}
-}
-#[allow(non_snake_case)]
-impl<$($T: Component),*> ComponentRetrieve for ($($T),*) {
-	type Containers = ($($T::Container),*);
-	type BoxedContainers = ($(Box<$T::Container>),*);
-	const IDS: &'static [ComponentId] = &[$($T::ID),*];
-
-	fn retrieve(components: &Components) -> Option<<Self::Containers as Container>::Ref<'_>> {
-		$(
-			let $T = components
-			.get(&$T::ID)?
-			.downcast_ref::<$T::Container>()?
-			.container_ref();
-		)*
-		Some(($($T),*))
-	}
-	fn retrieve_mut(
-		components: &mut Components,
-	) -> Option<<Self::Containers as Container>::Mut<'_>> {
-		let [$($T),*] = components.get_disjoint_mut([$(&$T::ID),*]);
-		$(
-			let $T = $T?.downcast_mut::<$T::Container>()?.container_mut();
-		)*
-		Some(($($T),*))
-	}
-	fn extract(
-		components: &mut Components,
-	) -> Option<Self::BoxedContainers> {
-		$( let $T = <$T>::extract(components); )*
-		if $(($T).is_some())&&* {
-			Some( ($(($T).unwrap()),*) )
-		} else {
-			$(
-			if let Some($T) = $T {
-				<$T>::insert(components, $T);
-			}
-			)*
-			None
-		}
-	}
-	fn insert(
-		components: &mut Components,
-		containers: Self::BoxedContainers
-	) {
-		let ($($T),*) = containers;
-		$(
-		<$T as ComponentRetrieve>::insert(components, $T);
-		)*
-	}
-}
-	};
-}
-container_tuples!(A, B);
-container_tuples!(A, B, C);
-container_tuples!(A, B, C, D);
-container_tuples!(A, B, C, D, E);
-container_tuples!(A, B, C, D, E, F);
-container_tuples!(A, B, C, D, E, F, G);
-container_tuples!(A, B, C, D, E, F, G, H);
-container_tuples!(A, B, C, D, E, F, G, H, I);
-container_tuples!(A, B, C, D, E, F, G, H, I, J);

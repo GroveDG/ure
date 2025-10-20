@@ -5,11 +5,11 @@ use slotmap::new_key_type;
 use spin_sleep::sleep;
 use ure::{
     app::{
-        App, AppProxy, Surfaces, WindowClose, WindowIds, WindowSizes, Windows, reconfigure_surfaces,
+        reconfigure_surfaces, App, AppProxy, WindowReceiver
     },
     gpu::GPU,
 };
-use ure_data::{Data, group::Group};
+use ure_data::{ComponentStruct, Data, Group};
 use wgpu::CommandEncoderDescriptor;
 use winit::{dpi::PhysicalSize, event_loop::EventLoop, window::WindowAttributes};
 
@@ -40,12 +40,14 @@ new_key_type! {
 }
 
 impl ure::app::Game for Game {
-    fn new(app: AppProxy, windows: Windows, window_close: WindowClose) -> Self {
+    fn new(app: AppProxy, windows: WindowReceiver) -> Self {
         let mut data = Data::<GameKey>::with_key();
         let windows = data.insert({
             let mut group = Group::default();
+            group.add_component(ComponentStruct::new(
+
+            ));
             group.add_component(windows);
-            group.add_component(window_close);
             group.add_component(WindowIds);
             group.add_component(Surfaces);
             group.add_component(WindowSizes);

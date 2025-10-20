@@ -7,6 +7,7 @@ edition = "2024"
 bitvec = "1.0.1"
 const-fnv1a-hash = "1.1.0"
 indexmap = "2.11.4"
+mident = "0.0.1"
 multimap = { version = "0.10.1", default-features = false }
 nohash-hasher = "0.2.0"
 one-or-many = { version = "0.4.0", default-features = false }

@@ -1,5 +1,4 @@
 use std::{
-    cell::OnceCell,
     collections::HashMap,
     marker::PhantomData,
     ops::Range,
@@ -10,7 +9,7 @@ use std::{
     },
 };
 
-use ure_data::{Extract, Get, Method, One, component, method};
+use ure_data::{One, component, method, new};
 use wgpu::{Surface, SurfaceTexture};
 use winit::{
     application::ApplicationHandler,
@@ -40,55 +39,50 @@ impl WindowReceiver {
     }
 }
 
-component!(WindowSource: One<WindowReceiver>);
-component!(Windows: Vec<Arc<Window>>);
-const NEW_WINDOWS: Method<Range<usize>> =
-    method!(new_windows, extract Windows, get WindowSource, args Range<usize>);
-pub fn new_windows(windows: Extract<Windows>, receiver: Get<WindowSource>, range: Range<usize>) {
-    for _ in range {
-        windows.push(receiver.new_window(WindowAttributes::default()));
-    }
-}
-component!(WindowExits: Vec<Arc<AtomicBool>>);
-pub fn new_window_exits(
-    window_exits: Extract<WindowExits>,
-    receiver: Get<WindowSource>,
-    range: Range<usize>,
-) {
-    for _ in range {
-        window_exits.push(receiver.recv_exit());
-    }
-}
-component!(WindowIds: Vec<WindowId>);
-pub fn new_window_ids(window_ids: Extract<WindowIds>, windows: Get<Windows>, range: Range<usize>) {
-    for i in range {
-        window_ids.push(windows[i].id());
-    }
-}
-component!(WindowSizes: Vec<PhysicalSize<u32>>);
-pub fn new_window_sizes(
-    window_sizes: Extract<WindowSizes>,
-    windows: Get<Windows>,
-    range: Range<usize>,
-) {
-    for i in range {
-        window_sizes.push(windows[i].inner_size());
-    }
-}
-component!(Surfaces: Vec<Surface<'static>>);
-pub fn new_surfaces(surfaces: Extract<Surfaces>, windows: Get<Windows>, range: Range<usize>) {
-    for i in range {
-        surfaces.push(GPU.instance.create_surface(windows[i].clone()).unwrap())
-    }
-}
-component!(SurfaceTextures: Vec<Option<SurfaceTexture>>);
+component!(WINDOW_SOURCE: One<WindowReceiver>);
+component!(WINDOWS: Vec<Arc<Window>>);
+component!(WINDOW_EXITS: Vec<Arc<AtomicBool>>);
+component!(WINDOW_IDS: Vec<WindowId>);
+component!(WINDOW_SIZES: Vec<PhysicalSize<u32>>);
+component!(SURFACES: Vec<Surface<'static>>);
+component!(SURFACE_TEXTURES: Vec<Option<SurfaceTexture>>);
 
-const RECONFIGURE_SURFACES: Method = method!(
-    reconfigure_surfaces,
-    get(Windows, WindowSizes, Surfaces, SurfaceTextures)
-);
+new!(pub new_windows WINDOWS (WINDOW_SOURCE));
+pub fn new_windows(windows: &mut Vec<Arc<Window>>, receiver: &WindowReceiver, i: usize) {
+    windows.push(receiver.new_window(WindowAttributes::default()));
+}
+new!(pub new_window_exits WINDOW_EXITS (WINDOW_SOURCE));
+pub fn new_window_exits(
+    window_exits: &mut Vec<Arc<AtomicBool>>,
+    receiver: &WindowReceiver,
+    i: usize,
+) {
+    window_exits.push(receiver.recv_exit());
+}
+new!(pub new_window_ids WINDOW_IDS (WINDOWS));
+pub fn new_window_ids(window_ids: &mut Vec<WindowId>, windows: &[Arc<Window>], i: usize) {
+    window_ids.push(windows[i].id());
+}
+new!(pub new_window_sizes WINDOW_SIZES (WINDOWS));
+pub fn new_window_sizes(
+    window_sizes: &mut Vec<PhysicalSize<u32>>,
+    windows: &[Arc<Window>],
+    i: usize,
+) {
+    window_sizes.push(windows[i].inner_size());
+}
+
+new!(pub new_surfaces SURFACES (WINDOWS));
+pub fn new_surfaces(surfaces: &mut Vec<Surface<'static>>, windows: &[Arc<Window>], i: usize) {
+    surfaces.push(GPU.instance.create_surface(windows[i].clone()).unwrap())
+}
+
+method!(pub reconfigure_surfaces () (WINDOWS, WINDOW_SIZES, SURFACES, SURFACE_TEXTURES));
 pub fn reconfigure_surfaces(
-    (windows, sizes, surfaces, textures): Get<(Windows, WindowSizes, Surfaces, SurfaceTextures)>,
+    windows: &[Arc<Window>],
+    sizes: &mut [PhysicalSize<u32>],
+    surfaces: &[Surface<'static>],
+    textures: &mut [Option<SurfaceTexture>],
 ) {
     for i in 0..surfaces.len() {
         let size = windows[i].inner_size();
@@ -159,10 +153,10 @@ impl<G: Game> ApplicationHandler<Event> for App<G> {
             input: input.clone(),
         };
         let windows = WindowReceiver {
-			windows: window_recv,
-			exits: exits_recv,
-			proxy: proxy.clone(),
-		};
+            windows: window_recv,
+            exits: exits_recv,
+            proxy: proxy.clone(),
+        };
 
         self.game = Some(std::thread::spawn(move || {
             let game = G::new(AppProxy { inner: proxy }, windows);

@@ -1,204 +1,97 @@
-use std::{any::Any, cell::UnsafeCell, collections::HashMap, marker::PhantomData, ops::Range};
+use std::{
+	any::Any,
+	cell::{self, RefCell},
+	collections::HashMap,
+};
 
-use crate::{Container, Method};
+use nohash_hasher::BuildNoHashHasher;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ComponentIdInner(u64);
-impl ComponentIdInner {
-    const fn new(ident: &str) -> Self {
-        Self(const_fnv1a_hash::fnv1a_hash_str_64(ident))
-    }
-}
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub struct ComponentId<C: Container> {
-    inner: ComponentIdInner,
-    _marker: PhantomData<C>,
-}
-impl<C: Container> ComponentId<C> {
-    pub const fn new(ident: &str) -> Self {
-        Self {
-            inner: ComponentIdInner::new(ident),
-            _marker: PhantomData,
-        }
-    }
-    pub const fn inner(&self) -> ComponentIdInner {
-        self.inner
-    }
-    pub unsafe fn get_container(&self, components: &Components) -> Option<&C> {
-        unsafe { components.get(&self.inner)?.get().as_mut() }?.downcast_ref::<C>()
-    }
-    pub unsafe fn get_container_mut(&self, components: &Components) -> Option<&mut C> {
-        unsafe { components.get(&self.inner)?.get().as_mut() }?.downcast_mut::<C>()
-    }
-    pub unsafe fn get(&self, components: &Components) -> Option<C::Ref<'_>> {
-        Some(
-            unsafe { components.get(&self.inner)?.get().as_mut() }?
-                .downcast_ref::<C>()?
-                .as_ref(),
-        )
-    }
-    pub unsafe fn get_mut(&self, components: &Components) -> Option<C::Mut<'_>> {
-        Some(
-            unsafe { components.get(&self.inner)?.get().as_mut() }?
-                .downcast_mut::<C>()?
-                .as_mut(),
-        )
-    }
-}
-impl<C: Container> Clone for ComponentId<C> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            _marker: self._marker.clone(),
-        }
-    }
-}
-impl<C: Container> Copy for ComponentId<C> {}
+use crate::{container::Container, group::Group, method::FromGroup};
 
-pub struct Component<C: Container> {
-    pub id: ComponentId<C>,
-    pub new: Method<Range<usize>>,
-    pub delete: Method<Range<usize>>,
-}
-impl<C: Container + Default> Component<C> {
-    pub fn new(&self) -> ComponentContainer<C> {
-        ComponentContainer {
-            id: self.id,
-            container: Default::default(),
-            len: 0,
-            new: self.new,
-            delete: self.delete,
-        }
-    }
-}
-impl<C: Container> Component<C> {
-    pub fn with(&self, container: C, len: usize) -> ComponentContainer<C> {
-        ComponentContainer {
-            id: self.id,
-            container,
-            len,
-            new: self.new,
-            delete: self.delete,
-        }
-    }
-}
-pub struct ComponentContainer<C: Container> {
-    pub id: ComponentId<C>,
-    pub container: C,
-    pub len: usize,
-    pub new: Method<Range<usize>>,
-    pub delete: Method<Range<usize>>,
+pub trait Component {
+	const ID: u64;
+	type Container: Container;
 }
 
-pub type Components = HashMap<ComponentIdInner, UnsafeCell<ComponentBox>>;
-type ComponentBox = Box<dyn Any>;
+pub const fn component_id(name: &str) -> u64 {
+	const_fnv1a_hash::fnv1a_hash_str_64(name)
+}
 
 #[macro_export]
 macro_rules! component {
-    (
-        $v:vis $name:ident : $t:ty
-        $(, new ( $get_i:ident $(, $get_name:ident : $get_new:expr )* $(,)? ) $new:expr )?
-        $(, del ( $del_i:ident $(, $del_name:ident : $get_del:ident )* $(,)? ) $del:expr )?
-    ) => {
-$crate::mident::mident! {
-$v const $name : $crate::Component<$t> = {
-    const ID: $crate::ComponentId<$t> = $crate::ComponentId::new(stringify!($name));
-    const NEW: $crate::Method<std::ops::Range<usize>> = $crate::new!(
-        #concat(NEW_ $name),
-        ID,
-        $( ($get_i, $($get_name : $get_new),*) $new )?
-    );
-    const DELETE: $crate::Method<std::ops::Range<usize>> = $crate::del!(
-        #concat(DEL_ $name),
-        ID,
-        $( ($del_i, $($del_name : $del_new),*) $del )?
-    );
-    $crate::Component{
-        id: ID,
-        new: NEW,
-        delete: DELETE
-    }
-};
+	($v:vis $name:ident, $container:ty) => {
+$v struct $name;
+impl $crate::Component for $name {
+	const ID: u64 = $crate::component_id(stringify!($name));
+	type Container = $container;
 }
-    };
+	};
 }
-#[macro_export]
-macro_rules! del {
-    (
-        $name:ident,
-        $component:expr $(,)?
-    ) => {
-$crate::Method::new(
-    stringify!($name),
-    |components, range| {
-        unsafe {
-        let mut c = $component.get_container_mut(components).unwrap();
-        $crate::Container::delete(c, range);
-        }
-    },
-    &[$component.inner()]
-)
-    };
-    (
-        $name:ident,
-        $component:expr,
-        ( $i:ident, $($get_name:ident : $get:expr),* $(,)? )
-        $func:expr $(,)?
-    ) => {
-$crate::Method::new(
-    stringify!($name),
-    |components, range| {
-        unsafe {
-        let mut c = $component.get_container_mut(components).unwrap();
-        $(
-        let mut $get_name = $get.id.get_mut(components).unwrap();
-        )*
-        for $i in range {
-            c.push($func);
-        }
-        }
-    },
-    &[$component.inner(), $( $get.id.inner() ),*]
-)
-    };
+
+pub struct ContainerRef<'a, C: Component>(pub cell::Ref<'a, C::Container>);
+impl<'a, C: Component> FromGroup<'a> for ContainerRef<'a, C> {
+	fn from_group(group: &'a Group) -> Option<Self>
+	where
+		Self: 'a + Sized,
+	{
+		Some(Self(group.borrow_container::<C>()?))
+	}
 }
-#[macro_export]
-macro_rules! new {
-    (
-        $name:ident,
-        $component:expr $(,)?
-    ) => {
-$crate::Method::new(
-    stringify!($name),
-    |components, range| {
-        unsafe {
-        let mut c = $component.get_container_mut(components).unwrap();
-        $crate::ContainerDefault::new(c, range);
-        }
-    },
-    &[$component.inner()]
-)
-    };
-    (
-        $name:ident,
-        $component:expr,
-        ( $i:ident, $($get_name:ident : $get:expr),* $(,)? )
-        $func:expr $(,)?
-    ) => {
-$crate::Method::new(
-    stringify!($name),
-    |components, range| {
-        unsafe {
-        let mut c = $component.get_container_mut(components).unwrap();
-        $(
-        let mut $get_name = $get.id.get_mut(components).unwrap();
-        )*
-        for $i in range {
-            c.push($func);
-        }
-        }
-    },
-    &[$component.inner(), $( $get.id.inner() ),*]
-)
-    };
+pub struct ContainerMut<'a, C: Component>(pub cell::RefMut<'a, C::Container>);
+impl<'a, C: Component> FromGroup<'a> for ContainerMut<'a, C> {
+	fn from_group(group: &'a Group) -> Option<Self>
+	where
+		Self: 'a + Sized,
+	{
+		Some(Self(group.borrow_container_mut::<C>()?))
+	}
+}
+pub struct CRef<'a, C: Component>(pub cell::Ref<'a, <C::Container as Container>::Slice>);
+impl<'a, C: Component> FromGroup<'a> for CRef<'a, C> {
+	fn from_group(group: &'a Group) -> Option<Self>
+	where
+		Self: 'a + Sized,
+	{
+		Some(Self(group.borrow_component::<C>()?))
+	}
+}
+pub struct CMut<'a, C: Component>(pub cell::RefMut<'a, <C::Container as Container>::Slice>);
+impl<'a, C: Component> FromGroup<'a> for CMut<'a, C> {
+	fn from_group(group: &'a Group) -> Option<Self>
+	where
+		Self: 'a + Sized,
+	{
+		Some(Self(group.borrow_component_mut::<C>()?))
+	}
+}
+
+#[derive(Debug, Default)]
+pub struct Components {
+	inner: HashMap<u64, RefCell<Box<dyn Any>>, BuildNoHashHasher<u64>>,
+}
+impl Components {
+	pub fn borrow_container<C: Component>(&'_ self) -> Option<cell::Ref<'_, C::Container>> {
+		cell::Ref::filter_map(self.inner.get(&C::ID)?.try_borrow().ok()?, |c| {
+			Some(c.downcast_ref::<C::Container>()?)
+		})
+		.ok()
+	}
+	pub fn borrow_container_mut<C: Component>(&'_ self) -> Option<cell::RefMut<'_, C::Container>> {
+		cell::RefMut::filter_map(self.inner.get(&C::ID)?.try_borrow_mut().ok()?, |c| {
+			Some(c.downcast_mut::<C::Container>()?)
+		})
+		.ok()
+	}
+	pub fn borrow_component<C: Component>(&'_ self) -> Option<cell::Ref<'_, <C::Container as Container>::Slice>> {
+		cell::Ref::filter_map(self.inner.get(&C::ID)?.try_borrow().ok()?, |c| {
+			Some(c.downcast_ref::<C::Container>()?.as_ref())
+		})
+		.ok()
+	}
+	pub fn borrow_component_mut<C: Component>(&'_ self) -> Option<cell::RefMut<'_, <C::Container as Container>::Slice>> {
+		cell::RefMut::filter_map(self.inner.get(&C::ID)?.try_borrow_mut().ok()?, |c| {
+			Some(c.downcast_mut::<C::Container>()?.as_mut())
+		})
+		.ok()
+	}
 }

@@ -1,0 +1,29 @@
+[package]
+name = "ure"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bytemuck = "1"
+color = { version = "0", features = ["bytemuck"] }
+fontdue = "0"
+glam = { version = "0", features = ["bytemuck"] }
+ordered-float = "5"
+parking_lot = "0"
+paste = "1.0.15"
+rand = "0"
+raw-window-handle = "0"
+rustc-hash = { version = "2" }
+slotmap = "1"
+spin_sleep = "1"
+winit = { version = "0", default-features = false, features = ["ahash", "bytemuck", "memmap2", "percent-encoding", "rwh_06", "wayland", "wayland-backend", "wayland-client", "wayland-dlopen", "wayland-protocols", "wayland-protocols-plasma",] }
+ure_data = { path = "../ure_data" }
+wgpu = "27"
+futures = "0.3.31"
+bitvec = "1.0.1"
+
+[features]
+default = ["2d", "gui"]
+2d = []
+3d = []
+gui = ["2d"]

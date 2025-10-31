@@ -4,12 +4,11 @@ use slotmap::new_key_type;
 use spin_sleep::sleep;
 use ure::{
     app::{
-        App, AppProxy, PRESENT_SURFACES, RECONFIGURE_SURFACES, SURFACE_TEXTURES, SURFACES,
-        WINDOW_EXITS, WINDOW_IDS, WINDOW_SIZES, WINDOWS, WindowReceiver,
+        App, AppProxy, SurfaceTextures, Surfaces, WindowExits, WindowReceiver, WindowSizes, WindowSource, Windows
     },
     gpu::GPU,
 };
-use ure_data::{ComponentContainer, Data, Group, One};
+use ure_data::{container::One, group::{Data, Group}};
 use wgpu::CommandEncoderDescriptor;
 use winit::event_loop::EventLoop;
 
@@ -38,17 +37,16 @@ new_key_type! {
 }
 
 impl ure::app::Game for Game {
-    fn new(app: AppProxy, windows: ComponentContainer<One<WindowReceiver>>) -> Self {
+    fn new(app: AppProxy, window_source: One<WindowReceiver>) -> Self {
         let mut data = Data::<GameKey>::with_key();
         let windows = data.insert({
             let mut group = Group::default();
-            group.add_component(windows);
-            group.add_component(WINDOWS.new());
-            group.add_component(WINDOW_EXITS.new());
-            group.add_component(WINDOW_IDS.new());
-            group.add_component(WINDOW_SIZES.new());
-            group.add_component(SURFACES.new());
-            group.add_component(SURFACE_TEXTURES.new());
+            group.add_container::<WindowSource>(window_source);
+			group.add_component::<Windows>();
+			group.add_component::<WindowExits>();
+			group.add_component::<WindowSizes>();
+			group.add_component::<Surfaces>();
+			group.add_component::<SurfaceTextures>();
             group.new(1);
             RefCell::new(group)
         });

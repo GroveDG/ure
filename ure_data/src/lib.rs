@@ -1,6 +1,8 @@
-pub mod component;
+pub mod components;
 pub mod container;
 pub mod group;
-pub mod resource;
-pub mod system;
 pub mod method;
+pub mod resource;
+pub mod signal;
+pub mod system;
+mod util;

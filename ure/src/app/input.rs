@@ -1,7 +1,7 @@
 use parking_lot::Mutex;
 use rustc_hash::FxHashMap;
+use bitvec::prelude::*;
 
-use ure_data::group::BitVec;
 use winit::{
 	event::{DeviceEvent, DeviceId},
 	keyboard::PhysicalKey, window::WindowId,

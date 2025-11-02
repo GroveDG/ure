@@ -1,4 +1,4 @@
-use std::{sync::Weak, sync::Arc};
+use std::{sync::Arc, sync::Weak};
 
 use parking_lot::Mutex;
 

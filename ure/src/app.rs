@@ -11,7 +11,7 @@ use std::{
 use ure_data::{
 	component,
 	components::{CompMut, CompRef, ContMut},
-	container::One,
+	containers::One,
 	group::Len,
 };
 use wgpu::{Surface, SurfaceTexture};
@@ -44,7 +44,7 @@ impl WindowReceiver {
 }
 
 component!(pub WindowSource: One<WindowReceiver>);
-component!(pub Windows: Vec<Arc<Window>>);
+component!(pub Windows: Vec<Arc<Window>>, new_windows as fn(_, _, _));
 pub fn new_windows(
 	ContMut(mut windows): ContMut<Windows>,
 	CompRef(window_source): CompRef<WindowSource>,
@@ -54,16 +54,55 @@ pub fn new_windows(
 		windows.push(window_source.new_window(Default::default()));
 	}
 }
-component!(pub WindowExits: Vec<Arc<AtomicBool>>);
-component!(pub WindowIds: Vec<WindowId>);
+component!(pub WindowExits: Vec<Arc<AtomicBool>>, new_window_exits as fn(_, _, _));
+pub fn new_window_exits(
+	ContMut(mut window_exits): ContMut<WindowExits>,
+	CompRef(window_source): CompRef<WindowSource>,
+	new: usize,
+) {
+	for _ in 0..new {
+		window_exits.push(window_source.recv_exit());
+	}
+}
+component!(pub WindowIds: Vec<WindowId>, new_window_ids as fn(_, _, _, _));
+pub fn new_window_ids(
+	Len(len): Len,
+	ContMut(mut window_ids): ContMut<WindowIds>,
+	CompRef(windows): CompRef<Windows>,
+	new: usize,
+) {
+	for i in len..len + new {
+		window_ids.push(windows[i].id());
+	}
+}
 component!(pub WindowSizes: Vec<PhysicalSize<u32>>);
-component!(pub Surfaces: Vec<Surface<'static>>);
+component!(pub Surfaces: Vec<Surface<'static>>, new_surfaces as fn(_, _, _, _));
+pub fn new_surfaces(
+	Len(len): Len,
+	ContMut(mut surfaces): ContMut<Surfaces>,
+	CompRef(windows): CompRef<Windows>,
+	new: usize,
+) {
+	for i in len..len + new {
+		surfaces.push(GPU.instance.create_surface(windows[i].clone()).unwrap());
+	}
+}
 component!(pub SurfaceTextures: Vec<Option<SurfaceTexture>>);
 
+pub fn close_windows(CompRef(window_exits): CompRef<WindowExits>, _: ()) -> Vec<usize> {
+	let mut delete = Vec::new();
+	for (i, c) in window_exits.iter().enumerate() {
+		if c.load(std::sync::atomic::Ordering::Relaxed) {
+			delete.push(i);
+		}
+	}
+	delete
+}
 pub fn reconfigure_surfaces(
 	Len(len): Len,
 	CompRef((windows, surfaces)): CompRef<(Windows, Surfaces)>,
 	CompMut((mut sizes, mut textures)): CompMut<(WindowSizes, SurfaceTextures)>,
+	_: (),
 ) {
 	for i in 0..len {
 		let window_size = windows[i].inner_size();
@@ -79,12 +118,16 @@ pub fn reconfigure_surfaces(
 		textures[i] = surfaces[i].get_current_texture().ok();
 	}
 }
-pub fn present_surfaces(CompMut(mut textures): CompMut<SurfaceTextures>) {
+pub fn present_surfaces(CompMut(mut textures): CompMut<SurfaceTextures>, _: ()) {
 	for texture in textures.iter_mut() {
 		if let Some(texture) = texture.take() {
 			texture.present();
 		}
 	}
+}
+
+pub struct WindowSystem {
+	
 }
 
 #[derive(Debug, Clone)]

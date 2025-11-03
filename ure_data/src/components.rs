@@ -176,7 +176,7 @@ impl<'a, C: ComponentGroup> ComponentDependency for ContRef<'a, C> {
 		C::IDS.to_vec()
 	}
 }
-impl<'a, C: ComponentGroup + 'a> FromGroup<'a> for ContRef<'a, C> {
+impl<'a, C: ComponentGroup> FromGroup<'a> for ContRef<'a, C> {
 	fn from_group(group: &'a Group) -> Option<Self>
 	where
 		Self: Sized,
@@ -190,7 +190,7 @@ impl<'a, C: ComponentGroup> ComponentDependency for ContMut<'a, C> {
 		C::IDS.to_vec()
 	}
 }
-impl<'a, C: ComponentGroup + 'a> FromGroup<'a> for ContMut<'a, C> {
+impl<'a, C: ComponentGroup> FromGroup<'a> for ContMut<'a, C> {
 	fn from_group(group: &'a Group) -> Option<Self>
 	where
 		Self: Sized,
@@ -204,7 +204,7 @@ impl<'a, C: ComponentGroup> ComponentDependency for CompRef<'a, C> {
 		C::IDS.to_vec()
 	}
 }
-impl<'a, C: ComponentGroup + 'a> FromGroup<'a> for CompRef<'a, C> {
+impl<'a, C: ComponentGroup> FromGroup<'a> for CompRef<'a, C> {
 	fn from_group(group: &'a Group) -> Option<Self>
 	where
 		Self: Sized,
@@ -218,7 +218,7 @@ impl<'a, C: ComponentGroup> ComponentDependency for CompMut<'a, C> {
 	}
 }
 pub struct CompMut<'a, C: ComponentGroup>(pub C::ComponentsRefMut<'a>);
-impl<'a, C: ComponentGroup + 'a> FromGroup<'a> for CompMut<'a, C> {
+impl<'a, C: ComponentGroup> FromGroup<'a> for CompMut<'a, C> {
 	fn from_group(group: &'a Group) -> Option<Self>
 	where
 		Self: Sized,

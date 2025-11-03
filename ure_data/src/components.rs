@@ -17,8 +17,10 @@ use crate::{
 pub struct ComponentId(u64);
 impl nohash_hasher::IsEnabled for ComponentId {}
 impl ComponentId {
-	pub const fn new(name: &str) -> Self {
-		Self(const_fnv1a_hash::fnv1a_hash_str_64(name))
+	pub const fn new(path: &str, name: &str) -> Self {
+		let path_hash = const_fnv1a_hash::fnv1a_hash_str_64(path);
+		let name_hash = const_fnv1a_hash::fnv1a_hash_str_64(name);
+		Self(crate::util::hash_combine(path_hash, name_hash))
 	}
 }
 
@@ -49,7 +51,7 @@ macro_rules! component {
 	($v:vis $name:ident: $container:ty) => {
 $v struct $name;
 impl $crate::components::Component for $name {
-	const ID: $crate::components::ComponentId = $crate::components::ComponentId::new(stringify!($name));
+	const ID: $crate::components::ComponentId = $crate::components::ComponentId::new(std::module_path!(), stringify!($name));
 	type Container = $container;
 
 	const NEW: $crate::method::Method<usize> = $crate::method::Method::new($crate::components::default_new::<Self> as fn(_, _));
@@ -59,7 +61,7 @@ impl $crate::components::Component for $name {
 	($v:vis $name:ident: $container:ty, $new:expr) => {
 $v struct $name;
 impl $crate::components::Component for $name {
-	const ID: $crate::components::ComponentId = $crate::components::ComponentId::new(stringify!($name));
+	const ID: $crate::components::ComponentId = $crate::components::ComponentId::new(std::module_path!(), stringify!($name));
 	type Container = $container;
 
 	const NEW: $crate::method::Method<usize> = $crate::method::Method::new($new);

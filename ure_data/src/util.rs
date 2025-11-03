@@ -28,3 +28,7 @@ $macro_name!(
 }
 
 pub(crate) use all_the_tuples;
+
+pub(crate) const fn hash_combine(a: u64, b: u64) -> u64 {
+	a ^ (b + 0x9e3779b9 + (a << 6) + (a >> 2))
+}

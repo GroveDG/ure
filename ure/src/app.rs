@@ -8,7 +8,8 @@ use ure_data::{
 	component,
 	components::{CompMut, CompRef, ContMut},
 	containers::One,
-	group::Len,
+	group::{Data, Len},
+	method::MethodTrait,
 };
 use wgpu::{Surface, SurfaceTexture};
 use winit::{
@@ -92,6 +93,59 @@ pub fn new_surfaces(
 }
 component!(pub SurfaceTextures: Vec<Option<SurfaceTexture>>);
 
+#[derive(Debug, Default)]
+pub struct WindowSystem<Key: slotmap::Key> {
+	keys: Vec<Key>,
+}
+impl<Key: slotmap::Key> WindowSystem<Key> {
+	pub fn add(&mut self, data: &Data<Key>, key: Key, app_proxy: AppProxy) {
+		let Some(group) = data.get(key) else {
+			return;
+		};
+		let mut group = group.borrow_mut();
+		group
+			.add_container::<Proxy>(One(app_proxy.clone()))
+			.unwrap();
+		group.add_component::<Windows>().unwrap();
+		group.add_component::<WindowExits>().unwrap();
+		group.add_component::<WindowSizes>().unwrap();
+		group.add_component::<Surfaces>().unwrap();
+		group.add_component::<SurfaceTextures>().unwrap();
+		self.keys.push(key)
+	}
+	pub fn close(&self, data: &Data<Key>) -> bool {
+		let mut all_closed = true;
+		for key in self.keys.iter().copied() {
+			if let Some(group) = data.get(key) {
+				let mut group = group.borrow_mut();
+				if let Some(delete) = (close_windows as fn(_, _) -> _).call_method(&group, ()) {
+					for delete in delete {
+						group.delete(delete);
+					}
+					all_closed &= group.is_empty();
+				}
+			}
+		}
+		all_closed
+	}
+	pub fn reconfigure(&self, data: &Data<Key>) {
+		for key in self.keys.iter().copied() {
+			if let Some(group) = data.get(key) {
+				let group = group.borrow();
+				(reconfigure_surfaces as fn(_, _, _, _)).call_method(&group, ());
+			}
+		}
+	}
+	pub fn present(&self, data: &Data<Key>) {
+		for key in self.keys.iter().copied() {
+			if let Some(group) = data.get(key) {
+				let group = group.borrow();
+				(present_surfaces as fn(_, _)).call_method(&group, ());
+			}
+		}
+	}
+}
+
 pub fn close_windows(CompRef(window_exits): CompRef<WindowExits>, _: ()) -> Vec<usize> {
 	let mut delete = Vec::new();
 	for (i, c) in window_exits.iter().enumerate() {
@@ -128,8 +182,6 @@ pub fn present_surfaces(CompMut(mut textures): CompMut<SurfaceTextures>, _: ()) 
 		}
 	}
 }
-
-pub struct WindowSystem {}
 
 #[derive(Debug)]
 pub enum Event {

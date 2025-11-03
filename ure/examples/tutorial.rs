@@ -3,19 +3,12 @@ use std::cell::RefCell;
 use slotmap::new_key_type;
 use spin_sleep::sleep;
 use ure::{
-	app::{
-		App, AppProxy, Proxy, SurfaceTextures, Surfaces, WindowExits, WindowSizes, Windows,
-		close_windows, present_surfaces, reconfigure_surfaces,
-	},
+	app::{App, AppProxy, WindowSystem},
 	gpu::GPU,
 };
-use ure_data::{
-	containers::One,
-	group::{Data, Group},
-	method::MethodTrait,
-};
+use ure_data::group::{Data, Group};
 use wgpu::CommandEncoderDescriptor;
-use winit::event_loop::{EventLoop, EventLoopProxy};
+use winit::event_loop::EventLoop;
 
 #[repr(usize)]
 #[derive(Debug, Clone, Copy)]
@@ -34,7 +27,7 @@ fn main() {
 struct Game {
 	app_proxy: AppProxy,
 	data: Data<GameKey>,
-	windows: GameKey,
+	window_system: WindowSystem<GameKey>,
 }
 
 new_key_type! {
@@ -44,22 +37,13 @@ new_key_type! {
 impl ure::app::Game for Game {
 	fn new(app_proxy: AppProxy) -> Self {
 		let mut data = Data::<GameKey>::with_key();
-		let windows = data.insert({
-			let mut group = Group::default();
-			group
-				.add_container::<Proxy>(One(app_proxy.clone()))
-				.unwrap();
-			group.add_component::<Windows>().unwrap();
-			group.add_component::<WindowExits>().unwrap();
-			group.add_component::<WindowSizes>().unwrap();
-			group.add_component::<Surfaces>().unwrap();
-			group.add_component::<SurfaceTextures>().unwrap();
-			group.new(1);
-			RefCell::new(group)
-		});
+		let windows = data.insert(RefCell::new(Group::default()));
+		let mut window_system = WindowSystem::default();
+		window_system.add(&data, windows, app_proxy.clone());
+		data.get(windows).unwrap().borrow_mut().new(1);
 		Game {
 			app_proxy,
-			windows,
+			window_system,
 			data,
 		}
 	}
@@ -69,37 +53,24 @@ impl ure::app::Game for Game {
 		let mut delta = std::time::Duration::ZERO;
 		'game: loop {
 			frame_start = std::time::Instant::now();
-
-			{
-				let mut windows = self.data.get(self.windows).unwrap().borrow_mut();
-				let delete = (close_windows as fn(_, _) -> _)
-					.call_method(&windows, ())
-					.unwrap();
-				for i in delete {
-					windows.delete(i);
-				}
-				if windows.is_empty() {
-					break 'game;
-				}
+			
+			// ================================ INPUT ================================
+			if self.window_system.close(&self.data) {
+				break 'game;
 			}
 
-			// RENDERING
-			{
-				if let Some(windows) = self.data.get(self.windows) {
-					let windows = windows.borrow_mut();
-					(reconfigure_surfaces as fn(_, _, _, _)).call_method(&windows, ());
+			// ============================== RENDERING ==============================
+			self.window_system.reconfigure(&self.data);
+			let encoder = GPU
+				.device
+				.create_command_encoder(&CommandEncoderDescriptor::default());
 
-					let encoder = GPU
-						.device
-						.create_command_encoder(&CommandEncoderDescriptor::default());
+			// RENDER PASSES
 
-					// RENDER PASSES
+			GPU.queue.submit([encoder.finish()]);
+			self.window_system.present(&self.data);
 
-					GPU.queue.submit([encoder.finish()]);
-
-					(present_surfaces as fn(_, _)).call_method(&windows, ());
-				}
-			}
+			// =============================== TIMING ================================
 			sleep(FRAME_TIME.saturating_sub(frame_start.elapsed()));
 			delta = frame_start.elapsed();
 		}

@@ -21,6 +21,7 @@ ure_data = { path = "../ure_data" }
 wgpu = "27"
 futures = "0.3.31"
 bitvec = "1.0.1"
+oneshot = { version = "0.1.11", default-features = false, features = ["std"] }
 
 [features]
 default = ["2d", "gui"]

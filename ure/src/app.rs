@@ -1,11 +1,7 @@
 use std::{
 	collections::HashMap,
 	marker::PhantomData,
-	sync::{
-		Arc,
-		atomic::AtomicBool,
-		mpsc::{Receiver, Sender, channel},
-	},
+	sync::{Arc, atomic::AtomicBool},
 };
 
 use ure_data::{
@@ -27,42 +23,49 @@ use crate::gpu::GPU;
 pub mod input;
 
 pub type Input = Arc<input::Input>;
-
-pub struct WindowReceiver {
-	windows: Receiver<Window>,
-	exits: Receiver<Arc<AtomicBool>>,
-	proxy: EventLoopProxy<Event>,
-}
-impl WindowReceiver {
-	pub fn new_window(&self, attrs: WindowAttributes) -> Arc<Window> {
-		self.proxy.send_event(Event::NewWindow(attrs)).unwrap();
-		Arc::new(self.windows.recv().unwrap())
+#[derive(Debug, Clone)]
+pub struct AppProxy(EventLoopProxy<Event>);
+impl AppProxy {
+	pub fn new_windows(&self, attrs: Vec<WindowAttributes>) -> Vec<Window> {
+		let (send, recv) = oneshot::channel();
+		self.0.send_event(Event::NewWindow(attrs, send)).unwrap();
+		recv.recv().unwrap()
 	}
-	pub fn recv_exit(&self) -> Arc<AtomicBool> {
-		self.exits.recv().unwrap()
+	pub fn recv_exits(&self, ids: Vec<WindowId>) -> Vec<Arc<AtomicBool>> {
+		let (send, recv) = oneshot::channel();
+		self.0.send_event(Event::RecvExits(ids, send)).unwrap();
+		recv.recv().unwrap()
+	}
+	pub fn exit(&self) {
+		self.0.send_event(Event::Exit).unwrap();
 	}
 }
 
-component!(pub WindowSource: One<WindowReceiver>);
+component!(pub Proxy: One<AppProxy>);
 component!(pub Windows: Vec<Arc<Window>>, new_windows as fn(_, _, _));
 pub fn new_windows(
 	ContMut(mut windows): ContMut<Windows>,
-	CompRef(window_source): CompRef<WindowSource>,
+	CompRef(app_proxy): CompRef<Proxy>,
 	new: usize,
 ) {
-	for _ in 0..new {
-		windows.push(window_source.new_window(Default::default()));
-	}
+	windows.append(
+		&mut app_proxy
+			.new_windows(vec![Default::default(); new])
+			.into_iter()
+			.map(|w| Arc::new(w))
+			.collect(),
+	);
 }
-component!(pub WindowExits: Vec<Arc<AtomicBool>>, new_window_exits as fn(_, _, _));
+component!(pub WindowExits: Vec<Arc<AtomicBool>>, new_window_exits as fn(_, _, _, _));
 pub fn new_window_exits(
+	Len(len): Len,
 	ContMut(mut window_exits): ContMut<WindowExits>,
-	CompRef(window_source): CompRef<WindowSource>,
+	CompRef((windows, app_proxy)): CompRef<(Windows, Proxy)>,
 	new: usize,
 ) {
-	for _ in 0..new {
-		window_exits.push(window_source.recv_exit());
-	}
+	window_exits.append(
+		&mut app_proxy.recv_exits(windows[len..len + new].iter().map(|w| w.id()).collect()),
+	);
 }
 component!(pub WindowIds: Vec<WindowId>, new_window_ids as fn(_, _, _, _));
 pub fn new_window_ids(
@@ -126,25 +129,18 @@ pub fn present_surfaces(CompMut(mut textures): CompMut<SurfaceTextures>, _: ()) 
 	}
 }
 
-pub struct WindowSystem {
-	
-}
+pub struct WindowSystem {}
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Event {
-	NewWindow(WindowAttributes),
+	NewWindow(Vec<WindowAttributes>, oneshot::Sender<Vec<Window>>),
+	RecvExits(Vec<WindowId>, oneshot::Sender<Vec<Arc<AtomicBool>>>),
 	Exit,
 }
 
 pub trait Game: 'static {
-	fn new(app: AppProxy, window_source: One<WindowReceiver>) -> Self;
+	fn new(proxy: AppProxy) -> Self;
 	fn run(self);
-}
-
-pub struct AppSender {
-	pub window: Sender<winit::window::Window>,
-	pub window_close: Sender<Arc<AtomicBool>>,
-	pub input: Input,
 }
 
 pub struct InputReceiver {
@@ -155,43 +151,19 @@ struct AppWindow {
 	closed: Arc<AtomicBool>,
 }
 
-pub struct AppProxy {
-	inner: EventLoopProxy<Event>,
-}
-impl AppProxy {
-	pub fn exit(&self) {
-		self.inner.send_event(Event::Exit).unwrap();
-	}
-}
-
 pub struct App<G: Game> {
 	game: Option<std::thread::JoinHandle<()>>,
 	proxy: EventLoopProxy<Event>,
-	sender: AppSender,
+	input: Input,
 	windows: HashMap<WindowId, AppWindow>,
 	_marker: PhantomData<G>,
 }
 impl<G: Game> ApplicationHandler<Event> for App<G> {
 	fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-		let proxy = self.proxy.clone();
-		let (window_send, window_recv) = channel();
-		let (window_close_send, exits_recv) = channel();
-		let input: Input = Default::default();
-
-		self.sender = AppSender {
-			window: window_send,
-			window_close: window_close_send,
-			input: input.clone(),
-		};
-		let window_receiver = WindowReceiver {
-			windows: window_recv,
-			exits: exits_recv,
-			proxy: proxy.clone(),
-		};
-		let window_source = One(window_receiver);
+		let proxy = AppProxy(self.proxy.clone());
 
 		self.game = Some(std::thread::spawn(move || {
-			let game = G::new(AppProxy { inner: proxy }, window_source);
+			let game = G::new(proxy);
 			game.run();
 		}));
 	}
@@ -221,18 +193,32 @@ impl<G: Game> ApplicationHandler<Event> for App<G> {
 		device_id: winit::event::DeviceId,
 		event: winit::event::DeviceEvent,
 	) {
-		self.sender.input.process_device_event(&device_id, event);
+		self.input.process_device_event(&device_id, event);
 	}
 
 	fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
 		match event {
-			Event::NewWindow(attrs) => {
-				let window = event_loop.create_window(attrs).unwrap();
-				let close = Arc::new(AtomicBool::new(false));
-				_ = self.sender.window_close.send(close.clone());
-				self.windows
-					.insert(window.id(), AppWindow { closed: close });
-				_ = self.sender.window.send(window);
+			Event::NewWindow(attrs, sender) => {
+				let windows: Vec<Window> = attrs
+					.into_iter()
+					.map(|attr| event_loop.create_window(attr).unwrap())
+					.collect();
+				for window in windows.iter() {
+					self.windows.insert(
+						window.id(),
+						AppWindow {
+							closed: Arc::new(AtomicBool::new(false)),
+						},
+					);
+				}
+				let _ = sender.send(windows);
+			}
+			Event::RecvExits(ids, sender) => {
+				_ = sender.send(
+					ids.into_iter()
+						.map(|id| self.windows.get(&id).unwrap().closed.clone())
+						.collect(),
+				)
 			}
 			Event::Exit => {
 				event_loop.exit();
@@ -252,11 +238,7 @@ impl<G: Game> App<G> {
 		Self {
 			game: Default::default(),
 			proxy,
-			sender: AppSender {
-				window: channel().0,
-				window_close: channel().0,
-				input: Default::default(),
-			},
+			input: Default::default(),
 			windows: Default::default(),
 			_marker: Default::default(),
 		}

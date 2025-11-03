@@ -1208,6 +1208,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "656c2b07e263f12ec9f9f0cac4d614f3af1ec7d99109710b6df677cf05313e2c"
 
 [[package]]
+name = "oneshot"
+version = "0.1.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4ce411919553d3f9fa53a0880544cda985a112117a0444d5ff1e870a893d6ea"
+
+[[package]]
 name = "orbclient"
 version = "0.3.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1787,6 +1793,7 @@ dependencies = [
  "fontdue",
  "futures",
  "glam",
+ "oneshot",
  "ordered-float",
  "parking_lot",
  "paste",

@@ -1,7 +1,6 @@
 use std::{
 	marker::PhantomData,
 	ops::Range,
-	slice::SliceIndex,
 	sync::{
 		OnceLock,
 		mpsc::{Sender, channel},
@@ -9,12 +8,10 @@ use std::{
 };
 
 use bytemuck::Pod;
-use parking_lot::Mutex;
 use ure_data::containers::Container;
 use wgpu::{
-	Adapter, Buffer, BufferUsages, CommandBuffer, CommandEncoder, Device, DeviceDescriptor,
-	Instance, InstanceDescriptor, Queue, RequestAdapterOptions, TextureFormat,
-	wgt::{BufferDescriptor, CommandEncoderDescriptor},
+	Adapter, Buffer, BufferUsages, Device, DeviceDescriptor, Instance, InstanceDescriptor, Queue,
+	RequestAdapterOptions, TextureFormat, wgt::BufferDescriptor,
 };
 
 pub static GPU: std::sync::LazyLock<Gpu> =
@@ -83,17 +80,18 @@ enum BufferCommand<T: Send> {
 }
 pub struct TypedBuffer<T: Pod + Send> {
 	inner: Buffer,
-	start: usize,
-	end: usize,
-	delete_send: Sender<usize>,
-	modify_send: Sender<(usize, T)>,
+	len: usize,
+	capacity: usize,
+	sender: Sender<BufferCommand<T>>,
 	_marker: PhantomData<T>,
 }
 impl<T: Pod + Send> TypedBuffer<T> {
-	pub fn extend(&mut self, num: usize) {
-		let len = self.len + num;
-		if len > self.capacity {
-			self.capacity = len.next_power_of_two();
+	pub fn push(&mut self, item: T) {
+		self.send_command(BufferCommand::Push(item));
+
+		self.len += 1;
+		if self.len > self.capacity {
+			self.capacity = self.len.next_power_of_two();
 			let usage = self.inner.usage();
 			let old_buffer = std::mem::replace(
 				&mut self.inner,
@@ -108,7 +106,6 @@ impl<T: Pod + Send> TypedBuffer<T> {
 			cmds.copy_buffer_to_buffer(&old_buffer, 0, &self.inner, 0, None);
 			GPU.queue.submit([cmds.finish()]);
 		}
-		self.len = len;
 	}
 	pub fn delete(&mut self, range: Range<usize>) {
 		let mut cmds = GPU.device.create_command_encoder(&Default::default());
@@ -169,11 +166,11 @@ impl<T: Pod + Send> TypedBuffer<T> {
 					BufferCommand::Push(item) => {
 						slice[len] = item;
 						len += 1;
-					},
+					}
 					BufferCommand::Delete(index) => {
 						slice[index] = slice[len];
 						len -= 1;
-					},
+					}
 				}
 			}
 		});
@@ -190,13 +187,8 @@ impl<T: Pod + Send> Container for TypedBuffer<T> {
 	fn as_mut(&mut self) -> &mut Self::Slice {
 		unsafe { std::mem::transmute(self) }
 	}
-
-	fn delete(&mut self, index: usize) {
-		self.send_command(BufferCommand::Delete(index));
-	}
-
-	fn push(&mut self, item: Self::Item) {
-		self.send_command(BufferCommand::Push(item));
+	fn delete(&mut self, indices: &[usize]) {
+		
 	}
 }
 #[repr(transparent)]

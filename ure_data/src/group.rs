@@ -18,7 +18,7 @@ pub struct Group {
 }
 
 signal!(pub NEW usize);
-signal!(pub DELETE usize);
+signal!(pub DELETE &[usize]);
 
 #[derive(Debug, Clone)]
 pub enum MethodError {
@@ -58,12 +58,18 @@ impl Group {
 		self.signals.connect(signal_id, method.into());
 	}
 	pub fn new(&mut self, num: usize) {
+		if num == 0 {
+			return;
+		}
 		self.signals.call(&NEW, self, num);
 		self.len += num;
 	}
-	pub fn delete(&mut self, index: usize) {
-		self.signals.call(&DELETE, self, index);
-		self.len -= 1;
+	pub fn delete(&mut self, indices: &[usize]) {
+		if indices.len() == 0 {
+			return;
+		}
+		self.signals.call(&DELETE, self, indices);
+		self.len -= indices.len();
 	}
 	pub fn borrow_container<C: Component>(&'_ self) -> Option<Ref<'_, C::Container>> {
 		self.components.borrow_container::<C>()

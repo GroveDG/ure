@@ -7,7 +7,7 @@ use std::{
 use nohash_hasher::BuildNoHashHasher;
 
 use crate::{
-	containers::{Container, DefaultNew},
+	containers::{Container, NewDefault},
 	group::Group,
 	method::{FromGroup, Method},
 	util::all_the_tuples,
@@ -33,7 +33,7 @@ pub trait Component: Sized {
 	type Container: Container;
 
 	const NEW: Method<usize>;
-	const DELETE: Method<usize>;
+	const DELETE: Method<&[usize]>;
 }
 impl<C: Component> ComponentDependency for C {
 	fn dependencies() -> Vec<ComponentId> {
@@ -55,7 +55,7 @@ impl $crate::components::Component for $name {
 	type Container = $container;
 
 	const NEW: $crate::method::Method<usize> = $crate::method::Method::new($crate::components::default_new::<Self> as fn(_, _));
-	const DELETE: $crate::method::Method<usize> = $crate::method::Method::new($crate::components::default_delete::<Self> as fn(_, _));
+	const DELETE: $crate::method::Method<&[usize]> = $crate::method::Method::new($crate::components::default_delete::<Self> as fn(_, _));
 }
 	};
 	($v:vis $name:ident: $container:ty, $new:expr) => {
@@ -65,20 +65,20 @@ impl $crate::components::Component for $name {
 	type Container = $container;
 
 	const NEW: $crate::method::Method<usize> = $crate::method::Method::new($new);
-	const DELETE: $crate::method::Method<usize> = $crate::method::Method::new($crate::components::default_delete::<Self> as fn(_, _));
+	const DELETE: $crate::method::Method<&[usize]> = $crate::method::Method::new($crate::components::default_delete::<Self> as fn(_, _));
 }
 	};
 }
 
 pub fn default_new<C: Component>(ContMut(mut container): ContMut<C>, num: usize)
 where
-	<C as Component>::Container: DefaultNew,
+	<C as Component>::Container: NewDefault,
 {
-	container.new(num);
+	container.new_default(num);
 }
 
-pub fn default_delete<C: Component>(ContMut(mut container): ContMut<C>, index: usize) {
-	container.delete(index);
+pub fn default_delete<C: Component>(ContMut(mut container): ContMut<C>, indices: &[usize]) {
+	container.delete(indices);
 }
 
 #[derive(Debug, Default)]

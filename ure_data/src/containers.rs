@@ -10,12 +10,25 @@ pub trait Container: Any {
 
 	fn as_ref(&self) -> &Self::Slice;
 	fn as_mut(&mut self) -> &mut Self::Slice;
-	fn delete(&mut self, index: usize);
-	fn push(&mut self, item: Self::Item);
+	fn delete(&mut self, indices: &[usize]);
 }
-
-pub trait DefaultNew {
-	fn new(&mut self, num: usize);
+pub trait Push: Container {
+	fn push(&mut self, items: Vec<Self::Item>);
+}
+pub trait NewDefault: Container {
+	fn new_default(&mut self, num: usize);
+}
+impl<C: Push> NewDefault for C
+where
+	C::Item: Default,
+{
+	fn new_default(&mut self, num: usize) {
+		let mut items = Vec::with_capacity(num);
+		for _ in 0..num {
+			items.push(Default::default())
+		}
+		self.push(items);
+	}
 }
 
 #[derive(Debug, Default)]
@@ -30,11 +43,10 @@ impl<T: 'static> Container for One<T> {
 	fn as_mut(&mut self) -> &mut Self::Slice {
 		&mut self.0
 	}
-	fn delete(&mut self, _: usize) {}
-	fn push(&mut self, _: Self::Item) {}
+	fn delete(&mut self, _: &[usize]) {}
 }
-impl<T> DefaultNew for One<T> {
-	fn new(&mut self, _: usize) {}
+impl<T: 'static> NewDefault for One<T> {
+	fn new_default(&mut self, _: usize) {}
 }
 impl<T: 'static> Container for Option<T> {
 	type Slice = Self;
@@ -46,11 +58,10 @@ impl<T: 'static> Container for Option<T> {
 	fn as_mut(&mut self) -> &mut Self::Slice {
 		self
 	}
-	fn delete(&mut self, _: usize) {}
-	fn push(&mut self, _: Self::Item) {}
+	fn delete(&mut self, _: &[usize]) {}
 }
-impl<T> DefaultNew for Option<T> {
-	fn new(&mut self, _: usize) {}
+impl<T: 'static> NewDefault for Option<T> {
+	fn new_default(&mut self, _: usize) {}
 }
 impl<T: 'static> Container for Vec<T> {
 	type Slice = [T];
@@ -62,18 +73,15 @@ impl<T: 'static> Container for Vec<T> {
 	fn as_mut(&mut self) -> &mut Self::Slice {
 		self
 	}
-	fn delete(&mut self, index: usize) {
-		self.swap_remove(index);
-	}
-	fn push(&mut self, item: Self::Item) {
-		self.push(item);
+	fn delete(&mut self, indices: &[usize]) {
+		for &index in indices {
+			self.swap_remove(index);
+		}
 	}
 }
-impl<T: 'static + Default> DefaultNew for Vec<T> {
-	fn new(&mut self, num: usize) {
-		for _ in 0..num {
-			self.push(Default::default());
-		}
+impl<T: 'static> Push for Vec<T> {
+	fn push(&mut self, mut items: Vec<Self::Item>) {
+		self.append(&mut items);
 	}
 }
 impl<T: 'static + Hash + Eq> Container for IndexSet<T> {
@@ -86,17 +94,16 @@ impl<T: 'static + Hash + Eq> Container for IndexSet<T> {
 	fn as_mut(&mut self) -> &mut Self::Slice {
 		self
 	}
-	fn delete(&mut self, index: usize) {
-		self.swap_remove_index(index);
-	}
-	fn push(&mut self, item: Self::Item) {
-		self.insert(item);
+	fn delete(&mut self, indices: &[usize]) {
+		for &index in indices {
+			self.swap_remove_index(index);
+		}
 	}
 }
-impl<T: 'static + Hash + Eq + Default> DefaultNew for IndexSet<T> {
-	fn new(&mut self, num: usize) {
-		for _ in 0..num {
-			self.push(Default::default());
+impl<T: 'static + Hash + Eq> Push for IndexSet<T> {
+	fn push(&mut self, items: Vec<Self::Item>) {
+		for item in items {
+			self.insert(item);
 		}
 	}
 }
@@ -110,23 +117,18 @@ impl<T: 'static> Container for OneOrMany<T> {
 	fn as_mut(&mut self) -> &mut Self::Slice {
 		self.as_mut_slice()
 	}
-	fn delete(&mut self, index: usize) {
+	fn delete(&mut self, indices: &[usize]) {
 		if let OneOrMany::Many(items) = self {
-			items.swap_remove(index);
-		}
-	}
-	fn push(&mut self, item: Self::Item) {
-		if let OneOrMany::Many(items) = self {
-			items.push(item);
+			for &index in indices {
+				items.swap_remove(index);
+			}
 		}
 	}
 }
-impl<T: 'static + Default> DefaultNew for OneOrMany<T> {
-	fn new(&mut self, num: usize) {
-		if let OneOrMany::Many(items) = self {
-			for _ in 0..num {
-				items.push(Default::default());
-			}
+impl<T: 'static> Push for OneOrMany<T> {
+	fn push(&mut self, mut items: Vec<Self::Item>) {
+		if let OneOrMany::Many(vec) = self {
+			vec.append(&mut items);
 		}
 	}
 }
@@ -140,17 +142,16 @@ impl Container for BitVec {
 	fn as_mut(&mut self) -> &mut Self::Slice {
 		self
 	}
-	fn delete(&mut self, index: usize) {
-		self.swap_remove(index);
-	}
-	fn push(&mut self, item: Self::Item) {
-		self.push(item);
+	fn delete(&mut self, indices: &[usize]) {
+		for &index in indices {
+			self.swap_remove(index);
+		}
 	}
 }
-impl DefaultNew for BitVec {
-	fn new(&mut self, num: usize) {
-		for _ in 0..num {
-			self.push(Default::default());
+impl Push for BitVec {
+	fn push(&mut self, items: Vec<Self::Item>) {
+		for item in items {
+			self.push(item);
 		}
 	}
 }

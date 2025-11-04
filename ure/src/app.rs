@@ -118,10 +118,8 @@ impl<Key: slotmap::Key> WindowSystem<Key> {
 		for key in self.keys.iter().copied() {
 			if let Some(group) = data.get(key) {
 				let mut group = group.borrow_mut();
-				if let Some(delete) = (close_windows as fn(_, _) -> _).call_method(&group, ()) {
-					for delete in delete {
-						group.delete(delete);
-					}
+				if let Some(delete) = (close_windows as fn(_, _) -> Vec<usize>).call_method(&group, ()) {
+					group.delete(&delete);
 					all_closed &= group.is_empty();
 				}
 			}

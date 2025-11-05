@@ -42,7 +42,7 @@ impl Signal {
 
 #[macro_export]
 macro_rules! signal {
-	($v:vis $name:ident $args:ty) => {
+	($v:vis $name:ident: $args:ty) => {
 $v const $name: $crate::signals::SignalId<$args> = $crate::signals::SignalId::new(stringify!($name));
 	};
 }

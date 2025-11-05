@@ -1,5 +1,10 @@
-use std::cell::{Ref, RefCell, RefMut};
+use std::{
+	any::Any,
+	cell::{Cell, Ref, RefCell, RefMut},
+	collections::HashMap,
+};
 
+use nohash_hasher::BuildNoHashHasher;
 use slotmap::SlotMap;
 
 use crate::{
@@ -17,20 +22,14 @@ pub struct Group {
 	signals: Signals,
 }
 
-signal!(pub NEW usize);
-signal!(pub DELETE &[usize]);
+signal!(pub NEW: &NewArgs);
+signal!(pub DELETE: &[usize]);
 
-#[derive(Debug, Clone)]
-pub enum MethodError {
-	MissingDependency(ComponentId),
-}
-#[derive(Debug, Clone)]
-pub enum ComponentError {
-	MissingDependency(ComponentId),
-}
+#[derive(Debug, Copy, Clone)]
+pub struct MissingDependency(pub ComponentId);
 
 impl Group {
-	pub fn add_component<C: Component>(&mut self) -> Result<(), ComponentError>
+	pub fn add_component<C: Component>(&mut self) -> Result<(), MissingDependency>
 	where
 		C::Container: Default,
 	{
@@ -39,12 +38,8 @@ impl Group {
 	pub fn add_container<C: Component>(
 		&mut self,
 		container: C::Container,
-	) -> Result<(), ComponentError> {
-		for depencency in C::dependencies() {
-			if !self.components.contains(&depencency) {
-				return Err(ComponentError::MissingDependency(depencency));
-			}
-		}
+	) -> Result<(), MissingDependency> {
+		self.are_depencencies_satisfied(&C::dependencies())?;
 		self.signals.connect(&NEW, C::NEW);
 		self.signals.connect(&DELETE, C::DELETE);
 		self.components.add::<C>(container);
@@ -58,11 +53,20 @@ impl Group {
 		self.signals.connect(signal_id, method.into());
 	}
 	pub fn new(&mut self, num: usize) {
-		if num == 0 {
+		self.new_args(NewArgs::new(num));
+	}
+	pub fn new_with(&mut self, num: usize) -> GroupNew<'_> {
+		GroupNew {
+			group: self,
+			args: NewArgs::new(num),
+		}
+	}
+	fn new_args(&mut self, args: NewArgs) {
+		if args.num() == 0 {
 			return;
 		}
-		self.signals.call(&NEW, self, num);
-		self.len += num;
+		self.signals.call(&NEW, self, &args);
+		self.len += args.num();
 	}
 	pub fn delete(&mut self, indices: &[usize]) {
 		if indices.len() == 0 {
@@ -93,6 +97,20 @@ impl Group {
 	pub fn is_empty(&self) -> bool {
 		self.len == 0
 	}
+	pub fn contains_component<C: Component>(&self) -> bool {
+		self.components.contains(&C::ID)
+	}
+	pub fn are_depencencies_satisfied(
+		&self,
+		dependencies: &[ComponentId],
+	) -> Result<(), MissingDependency> {
+		for depencency in dependencies {
+			if !self.components.contains(&depencency) {
+				return Err(MissingDependency(*depencency));
+			}
+		}
+		Ok(())
+	}
 }
 
 pub type Data<Key> = SlotMap<Key, RefCell<Group>>;
@@ -109,5 +127,55 @@ impl<'a> FromGroup<'a> for Len {
 		Self: Sized,
 	{
 		Some(Self(group.len()))
+	}
+}
+
+pub struct NewArgs {
+	num: usize,
+	map: HashMap<ComponentId, Cell<Option<Box<dyn Any>>>, BuildNoHashHasher<ComponentId>>,
+}
+impl NewArgs {
+	pub fn new(num: usize) -> Self {
+		Self {
+			num,
+			map: Default::default(),
+		}
+	}
+	pub fn take<C: Component>(&self) -> Option<C::NewArg>
+	where
+		C::NewArg: 'static,
+	{
+		let cell = self.map.get(&C::ID)?;
+		Some(*cell.take().unwrap().downcast().unwrap())
+	}
+	pub fn add<C: Component>(&mut self, args: C::NewArg)
+	where
+		C::NewArg: 'static,
+	{
+		self.map.insert(C::ID, Cell::new(Some(Box::new(args)))); // TODO: Validate Args
+	}
+	pub fn num(&self) -> usize {
+		self.num
+	}
+}
+
+#[must_use]
+pub struct GroupNew<'a> {
+	group: &'a mut Group,
+	args: NewArgs,
+}
+impl<'a> GroupNew<'a> {
+	pub fn add<C: Component>(mut self, args: C::NewArg) -> Self
+	where
+		C::NewArg: 'static,
+	{
+		if !self.group.contains_component::<C>() {
+			return self; // TODO: Return Err somewhere
+		}
+		self.args.add::<C>(args);
+		self
+	}
+	pub fn done(self) {
+		self.group.new_args(self.args);
 	}
 }

@@ -1,5 +1,5 @@
 use std::{
-	any::Any,
+	any::{Any, TypeId},
 	cell::{self, RefCell},
 	collections::HashMap,
 };
@@ -7,8 +7,8 @@ use std::{
 use nohash_hasher::BuildNoHashHasher;
 
 use crate::{
-	containers::{Container, NewDefault},
-	group::Group,
+	containers::{Container, NewDefault, NewWith},
+	group::{Group, NewArgs},
 	method::{FromGroup, Method},
 	util::all_the_tuples,
 };
@@ -32,8 +32,10 @@ pub trait Component: Sized {
 	const ID: ComponentId;
 	type Container: Container;
 
-	const NEW: Method<usize>;
+	const NEW: Method<&NewArgs>;
 	const DELETE: Method<&[usize]>;
+
+	type NewArg;
 }
 impl<C: Component> ComponentDependency for C {
 	fn dependencies() -> Vec<ComponentId> {
@@ -54,27 +56,41 @@ impl $crate::components::Component for $name {
 	const ID: $crate::components::ComponentId = $crate::components::ComponentId::new(std::module_path!(), stringify!($name));
 	type Container = $container;
 
-	const NEW: $crate::method::Method<usize> = $crate::method::Method::new($crate::components::default_new::<Self> as fn(_, _));
+	const NEW: $crate::method::Method<&$crate::group::NewArgs> = $crate::method::Method::new($crate::components::default_new::<Self, $container> as fn(_, _));
 	const DELETE: $crate::method::Method<&[usize]> = $crate::method::Method::new($crate::components::default_delete::<Self> as fn(_, _));
+
+	type NewArg = <Self::Container as $crate::containers::NewWith>::Args;
 }
 	};
-	($v:vis $name:ident: $container:ty, $new:expr) => {
+	($v:vis $name:ident: $container:ty, $new:expr, $new_arg:ty) => {
 $v struct $name;
 impl $crate::components::Component for $name {
 	const ID: $crate::components::ComponentId = $crate::components::ComponentId::new(std::module_path!(), stringify!($name));
 	type Container = $container;
 
-	const NEW: $crate::method::Method<usize> = $crate::method::Method::new($new);
+	const NEW: $crate::method::Method<&$crate::group::NewArgs> = $crate::method::Method::new($new);
 	const DELETE: $crate::method::Method<&[usize]> = $crate::method::Method::new($crate::components::default_delete::<Self> as fn(_, _));
+
+	type NewArg = $new_arg;
 }
 	};
 }
 
-pub fn default_new<C: Component>(ContMut(mut container): ContMut<C>, num: usize)
+pub fn default_new<C, Cont>(ContMut(mut container): ContMut<C>, args: &NewArgs)
 where
-	<C as Component>::Container: NewDefault,
+	Cont: Container,
+	Cont: NewWith + NewDefault,
+	C: Component<Container = Cont, NewArg = <Cont as NewWith>::Args>
 {
-	container.new_default(num);
+	assert_eq!(
+		TypeId::of::<C::NewArg>(),
+		TypeId::of::<<C::Container as NewWith>::Args>()
+	);
+	if let Some(args) = args.take::<C>() {
+		container.new_with(unsafe { std::mem::transmute(args) });
+	} else {
+		container.new_default(args.num())
+	}
 }
 
 pub fn default_delete<C: Component>(ContMut(mut container): ContMut<C>, indices: &[usize]) {

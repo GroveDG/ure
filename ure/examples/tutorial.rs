@@ -3,12 +3,12 @@ use std::cell::RefCell;
 use slotmap::new_key_type;
 use spin_sleep::sleep;
 use ure::{
-	app::{App, AppProxy, WindowSystem},
+	app::{App, AppProxy, WindowSystem, Windows},
 	gpu::GPU,
 };
 use ure_data::group::{Data, Group};
 use wgpu::CommandEncoderDescriptor;
-use winit::event_loop::EventLoop;
+use winit::{event_loop::EventLoop, window::WindowAttributes};
 
 #[repr(usize)]
 #[derive(Debug, Clone, Copy)]
@@ -40,7 +40,12 @@ impl ure::app::Game for Game {
 		let windows = data.insert(RefCell::new(Group::default()));
 		let mut window_system = WindowSystem::default();
 		window_system.add(&data, windows, app_proxy.clone());
-		data.get(windows).unwrap().borrow_mut().new(1);
+		data.get(windows)
+			.unwrap()
+			.borrow_mut()
+			.new_with(1)
+			.add::<Windows>(vec![WindowAttributes::default().with_title("URE")])
+			.done();
 		Game {
 			app_proxy,
 			window_system,
@@ -53,7 +58,7 @@ impl ure::app::Game for Game {
 		let mut delta = std::time::Duration::ZERO;
 		'game: loop {
 			frame_start = std::time::Instant::now();
-			
+
 			// ================================ INPUT ================================
 			if self.window_system.close(&self.data) {
 				break 'game;

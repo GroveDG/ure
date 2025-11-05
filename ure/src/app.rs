@@ -8,7 +8,7 @@ use ure_data::{
 	component,
 	components::{CompMut, CompRef, ContMut},
 	containers::One,
-	group::{Data, Len},
+	group::{Data, Len, NewArgs},
 	method::MethodTrait,
 };
 use wgpu::{Surface, SurfaceTexture};
@@ -43,51 +43,58 @@ impl AppProxy {
 }
 
 component!(pub Proxy: One<AppProxy>);
-component!(pub Windows: Vec<Arc<Window>>, new_windows as fn(_, _, _));
+component!(pub Windows: Vec<Arc<Window>>, new_windows as fn(_, _, _), Vec<WindowAttributes>);
 pub fn new_windows(
 	ContMut(mut windows): ContMut<Windows>,
 	CompRef(app_proxy): CompRef<Proxy>,
-	new: usize,
+	args: &NewArgs,
 ) {
-	windows.append(
+	let attrs = args
+		.take::<Windows>()
+		.unwrap_or_else(|| vec![Default::default(); args.num()]);
+	windows.extend(
 		&mut app_proxy
-			.new_windows(vec![Default::default(); new])
+			.new_windows(attrs)
 			.into_iter()
-			.map(|w| Arc::new(w))
-			.collect(),
+			.map(|w| Arc::new(w)),
 	);
 }
-component!(pub WindowExits: Vec<Arc<AtomicBool>>, new_window_exits as fn(_, _, _, _));
+component!(pub WindowExits: Vec<Arc<AtomicBool>>, new_window_exits as fn(_, _, _, _), ());
 pub fn new_window_exits(
 	Len(len): Len,
 	ContMut(mut window_exits): ContMut<WindowExits>,
 	CompRef((windows, app_proxy)): CompRef<(Windows, Proxy)>,
-	new: usize,
+	args: &NewArgs,
 ) {
 	window_exits.append(
-		&mut app_proxy.recv_exits(windows[len..len + new].iter().map(|w| w.id()).collect()),
+		&mut app_proxy.recv_exits(
+			windows[len..len + args.num()]
+				.iter()
+				.map(|w| w.id())
+				.collect(),
+		),
 	);
 }
-component!(pub WindowIds: Vec<WindowId>, new_window_ids as fn(_, _, _, _));
+component!(pub WindowIds: Vec<WindowId>, new_window_ids as fn(_, _, _, _), ());
 pub fn new_window_ids(
 	Len(len): Len,
 	ContMut(mut window_ids): ContMut<WindowIds>,
 	CompRef(windows): CompRef<Windows>,
-	new: usize,
+	args: &NewArgs,
 ) {
-	for i in len..len + new {
+	for i in len..len + args.num() {
 		window_ids.push(windows[i].id());
 	}
 }
 component!(pub WindowSizes: Vec<PhysicalSize<u32>>);
-component!(pub Surfaces: Vec<Surface<'static>>, new_surfaces as fn(_, _, _, _));
+component!(pub Surfaces: Vec<Surface<'static>>, new_surfaces as fn(_, _, _, _), ());
 pub fn new_surfaces(
 	Len(len): Len,
 	ContMut(mut surfaces): ContMut<Surfaces>,
 	CompRef(windows): CompRef<Windows>,
-	new: usize,
+	args: &NewArgs,
 ) {
-	for i in len..len + new {
+	for i in len..len + args.num() {
 		surfaces.push(GPU.instance.create_surface(windows[i].clone()).unwrap());
 	}
 }
@@ -118,7 +125,9 @@ impl<Key: slotmap::Key> WindowSystem<Key> {
 		for key in self.keys.iter().copied() {
 			if let Some(group) = data.get(key) {
 				let mut group = group.borrow_mut();
-				if let Some(delete) = (close_windows as fn(_, _) -> Vec<usize>).call_method(&group, ()) {
+				if let Some(delete) =
+					(close_windows as fn(_, _) -> Vec<usize>).call_method(&group, ())
+				{
 					group.delete(&delete);
 					all_closed &= group.is_empty();
 				}

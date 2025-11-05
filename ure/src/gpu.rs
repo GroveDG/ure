@@ -1,17 +1,11 @@
-use std::{
-	marker::PhantomData,
-	ops::Range,
-	sync::{
-		OnceLock,
-		mpsc::{Sender, channel},
-	},
-};
+use std::{marker::PhantomData, sync::OnceLock};
 
+use bitvec::vec::BitVec;
 use bytemuck::Pod;
-use ure_data::containers::Container;
+use ure_data::containers::{Container, NewDefault};
 use wgpu::{
-	Adapter, Buffer, BufferUsages, Device, DeviceDescriptor, Instance, InstanceDescriptor, Queue,
-	RequestAdapterOptions, TextureFormat, wgt::BufferDescriptor,
+	Adapter, Buffer, BufferUsages, CommandEncoder, Device, DeviceDescriptor, Instance,
+	InstanceDescriptor, Queue, RequestAdapterOptions, TextureFormat, wgt::BufferDescriptor,
 };
 
 pub static GPU: std::sync::LazyLock<Gpu> =
@@ -74,64 +68,20 @@ impl Gpu {
 	}
 }
 
-enum BufferCommand<T: Send> {
-	Push(T),
-	Delete(usize),
-}
-pub struct TypedBuffer<T: Pod + Send> {
+pub struct TypedBuffer<T: Pod> {
 	inner: Buffer,
 	len: usize,
+	up_len: usize,
 	capacity: usize,
-	sender: Sender<BufferCommand<T>>,
+	diff: BitVec,
 	_marker: PhantomData<T>,
 }
-impl<T: Pod + Send> TypedBuffer<T> {
-	pub fn push(&mut self, item: T) {
-		self.send_command(BufferCommand::Push(item));
-
-		self.len += 1;
-		if self.len > self.capacity {
-			self.capacity = self.len.next_power_of_two();
-			let usage = self.inner.usage();
-			let old_buffer = std::mem::replace(
-				&mut self.inner,
-				GPU.device.create_buffer(&BufferDescriptor {
-					label: None,
-					size: self.capacity as u64,
-					usage,
-					mapped_at_creation: false,
-				}),
-			);
-			let mut cmds = GPU.device.create_command_encoder(&Default::default());
-			cmds.copy_buffer_to_buffer(&old_buffer, 0, &self.inner, 0, None);
-			GPU.queue.submit([cmds.finish()]);
-		}
+impl<T: Pod> Default for TypedBuffer<T> {
+	fn default() -> Self {
+		Self::new(BufferUsages::empty())
 	}
-	pub fn delete(&mut self, range: Range<usize>) {
-		let mut cmds = GPU.device.create_command_encoder(&Default::default());
-		let len = (self.len * size_of::<T>()) as u64;
-		let size = (range.len() * size_of::<T>()) as u64;
-		let src_offset = len - size;
-		let dest_offset = (range.start * size_of::<T>()) as u64;
-		{
-			let buffer = self.inner.clone();
-			self.inner.map_async(wgpu::MapMode::Write, .., move |e| {
-				if e.is_err() {
-					return;
-				}
-				let mut dest = buffer.get_mapped_range_mut(dest_offset..dest_offset + size);
-				let src = buffer.get_mapped_range(src_offset..src_offset + size);
-
-				dest.copy_from_slice(&src);
-
-				drop(dest);
-				drop(src);
-				drop(buffer);
-			});
-		}
-		cmds.clear_buffer(&self.inner, src_offset, Some(size));
-		GPU.queue.submit([cmds.finish()]);
-	}
+}
+impl<T: Pod> TypedBuffer<T> {
 	pub fn new(usage: BufferUsages) -> Self {
 		Self {
 			inner: GPU.device.create_buffer(&BufferDescriptor {
@@ -141,42 +91,30 @@ impl<T: Pod + Send> TypedBuffer<T> {
 				mapped_at_creation: false,
 			}),
 			len: 0,
+			up_len: 0,
 			capacity: 0,
-			sender: channel().0,
+			diff: BitVec::new(),
 			_marker: PhantomData,
 		}
 	}
-	fn send_command(&mut self, command: BufferCommand<T>) {
-		if self.sender.send(command).is_ok() {
+	pub fn update_size(&mut self, encoder: &mut CommandEncoder) {
+		let up_capacity = self.up_len.next_power_of_two();
+		if self.capacity >= up_capacity {
 			return;
 		}
 
-		let (send, recv) = channel();
-		self.sender = send;
-		let buffer = self.inner.clone();
-		let mut len = self.len;
-		self.inner.map_async(wgpu::MapMode::Write, .., move |e| {
-			if e.is_err() {
-				return;
-			}
-			let mut view = buffer.get_mapped_range_mut(..);
-			let slice: &mut [T] = bytemuck::cast_slice_mut(&mut view);
-			for command in recv.try_iter() {
-				match command {
-					BufferCommand::Push(item) => {
-						slice[len] = item;
-						len += 1;
-					}
-					BufferCommand::Delete(index) => {
-						slice[index] = slice[len];
-						len -= 1;
-					}
-				}
-			}
+		let new_buffer = GPU.device.create_buffer(&BufferDescriptor {
+			label: None,
+			size: (up_capacity * size_of::<T>()) as u64,
+			usage: self.inner.usage(),
+			mapped_at_creation: false,
 		});
+		encoder.copy_buffer_to_buffer(&self.inner, 0, &new_buffer, 0, self.inner.size());
+
+		self.inner = new_buffer;
 	}
 }
-impl<T: Pod + Send> Container for TypedBuffer<T> {
+impl<T: Pod> Container for TypedBuffer<T> {
 	type Slice = TypedBufferSlice<T>;
 	type Item = T;
 
@@ -188,10 +126,21 @@ impl<T: Pod + Send> Container for TypedBuffer<T> {
 		unsafe { std::mem::transmute(self) }
 	}
 	fn delete(&mut self, indices: &[usize]) {
-		
+		self.diff.reserve(indices.len());
+		for &index in indices {
+			self.diff.set(index, true);
+		}
+		self.up_len -= indices.len();
+		self.diff.truncate(self.up_len);
+	}
+}
+impl<T: Pod + Default> NewDefault for TypedBuffer<T> {
+	fn new_default(&mut self, num: usize) {
+		self.up_len += num;
+		self.diff.resize(self.up_len, true);
 	}
 }
 #[repr(transparent)]
-pub struct TypedBufferSlice<T: Pod + Send> {
+pub struct TypedBufferSlice<T: Pod> {
 	inner: TypedBuffer<T>,
 }

@@ -2,7 +2,7 @@ use std::{marker::PhantomData, sync::OnceLock};
 
 use bitvec::vec::BitVec;
 use bytemuck::Pod;
-use ure_data::containers::{Container, NewDefault};
+use ure_data::containers::{Container, NewDefault, NewWith};
 use wgpu::{
 	Adapter, Buffer, BufferUsages, CommandEncoder, Device, DeviceDescriptor, Instance,
 	InstanceDescriptor, Queue, RequestAdapterOptions, TextureFormat, wgt::BufferDescriptor,
@@ -18,29 +18,6 @@ pub type Srgba = AlphaColor<color::Srgb>;
 pub type Srgb = OpaqueColor<color::Srgb>;
 
 pub use color::Rgba8;
-
-// pub struct Colors;
-// impl Component for Colors {
-//     const IDENT: &'static str = "Colors";
-
-//     type Container = Vec<Rgba8>;
-// }
-// pub struct ColorNewDefaultWhite;
-// impl Method for ColorNewDefaultWhite {
-//     const IDENT: &'static str = "ColorNewDefaultWhite";
-
-//     type Args = Range<usize>;
-//     type Components = Colors;
-
-//     fn call(
-//         components: <<Self::Components as ure_data::group::ComponentRetrieve>::Containers as Container>::Mut<'_>,
-//         args: Self::Args,
-//     ) {
-//         for i in args {
-//             components
-//         }
-//     }
-// }
 
 pub struct Gpu {
 	pub instance: Instance,
@@ -115,11 +92,11 @@ impl<T: Pod> TypedBuffer<T> {
 	}
 }
 impl<T: Pod> Container for TypedBuffer<T> {
-	type Slice = TypedBufferSlice<T>;
+	type Slice = [T];
 	type Item = T;
 
 	fn as_ref(&self) -> &Self::Slice {
-		unsafe { std::mem::transmute(self) }
+		self.inner.get_mapped_range(..)
 	}
 
 	fn as_mut(&mut self) -> &mut Self::Slice {
@@ -140,7 +117,10 @@ impl<T: Pod + Default> NewDefault for TypedBuffer<T> {
 		self.diff.resize(self.up_len, true);
 	}
 }
-#[repr(transparent)]
-pub struct TypedBufferSlice<T: Pod> {
-	inner: TypedBuffer<T>,
+impl<T: Pod + Default> NewWith for TypedBuffer<T> {
+	type Args = ();
+
+	fn new_with(&mut self, _: Self::Args) {
+		panic!("Do not call 'new_with' on TypedBuffers.")
+	}
 }

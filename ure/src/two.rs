@@ -4,7 +4,7 @@ use color::palette::css::WHITE;
 use glam::{Affine2, Vec2};
 use ure_data::{
 	component,
-	components::ContMut,
+	components::{CompMut, CompRef, ContMut},
 	containers::OneOrMany,
 	group::{Data, NewArgs},
 	resource::Resource,
@@ -102,9 +102,26 @@ impl Instance2D {
 	};
 }
 
-// component!(pub Instances2D: TypedBuffer<Instance2D>);
-component!(pub Meshes2D: OneOrMany<Arc<Mesh2D>>, new_mesh2d as fn(_, _), Vec<Arc<Mesh2D>>);
-pub fn new_mesh2d(ContMut(mut meshes): ContMut<Meshes2D>, args: &NewArgs) {
+component!(pub Colors: Vec<Srgba>, new_colors as fn(_, _), Vec<Srgba>);
+pub fn new_colors(ContMut(mut colors): ContMut<Colors>, args: &NewArgs) {
+	if let Some(mut new_colors) = args.take::<Colors>() {
+		colors.append(&mut new_colors);
+	} else {
+		colors.append(&mut vec![WHITE; args.num()]);
+	}
+}
+component!(pub Transforms2D: Vec<Affine2>);
+component!(pub Instances2D: TypedBuffer<Instance2D>);
+pub fn update_instances_2d(
+	CompMut(mut instances): CompMut<Instances2D>,
+	CompRef(transforms): CompRef<Transforms2D>,
+	colors: Option<CompRef<Colors>>,
+	args: &NewArgs,
+) {
+	instances.
+}
+component!(pub Meshes2D: OneOrMany<Arc<Mesh2D>>, new_meshes_2d as fn(_, _), Vec<Arc<Mesh2D>>);
+pub fn new_meshes_2d(ContMut(mut meshes): ContMut<Meshes2D>, args: &NewArgs) {
 	let OneOrMany::Many(vec) = &mut *meshes else {
 		return;
 	};

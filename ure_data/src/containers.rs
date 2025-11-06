@@ -1,15 +1,19 @@
-use std::{any::Any, hash::Hash};
+use std::{
+	any::Any,
+	cell::{Ref, RefMut},
+	hash::Hash,
+};
 
 pub use bitvec::{slice::BitSlice, vec::BitVec};
 pub use indexmap::IndexSet;
 pub use one_or_many::OneOrMany;
 
 pub trait Container: Any {
-	type Slice: ?Sized;
-	type Item;
+	type Ref<'a>;
+	type RefMut<'a>;
 
-	fn as_ref(&self) -> &Self::Slice;
-	fn as_mut(&mut self) -> &mut Self::Slice;
+	fn as_ref<'a>(cont: Ref<'a, Self>) -> Self::Ref<'a>;
+	fn as_mut<'a>(cont: RefMut<'a, Self>) -> Self::RefMut<'a>;
 	fn delete(&mut self, indices: &[usize]);
 }
 pub trait NewDefault: Container {
@@ -24,14 +28,14 @@ pub trait NewWith: Container {
 #[derive(Debug, Default)]
 pub struct One<T: 'static>(pub T);
 impl<T: 'static> Container for One<T> {
-	type Slice = T;
-	type Item = T;
+	type Ref<'a> = Ref<'a, T>;
+	type RefMut<'a> = RefMut<'a, T>;
 
-	fn as_ref(&self) -> &Self::Slice {
-		&self.0
+	fn as_ref<'a>(cont: Ref<'a, Self>) -> Self::Ref<'a> {
+		Ref::map(cont, |c| &c.0)
 	}
-	fn as_mut(&mut self) -> &mut Self::Slice {
-		&mut self.0
+	fn as_mut<'a>(cont: RefMut<'a, Self>) -> Self::RefMut<'a> {
+		RefMut::map(cont, |c| &mut c.0)
 	}
 	fn delete(&mut self, _: &[usize]) {}
 }
@@ -44,14 +48,22 @@ impl<T: 'static> NewWith for One<T> {
 	fn new_with(&mut self, _: Self::Args) {}
 }
 impl<T: 'static> Container for Option<T> {
-	type Slice = Self;
-	type Item = T;
+	type Ref<'a> = Option<Ref<'a, T>>;
+	type RefMut<'a> = Option<RefMut<'a, T>>;
 
-	fn as_ref(&self) -> &Self::Slice {
-		self
+	fn as_ref<'a>(cont: Ref<'a, Self>) -> Self::Ref<'a> {
+		if cont.is_some() {
+			Some(Ref::map(cont, |c| c.as_ref().unwrap()))
+		} else {
+			None
+		}
 	}
-	fn as_mut(&mut self) -> &mut Self::Slice {
-		self
+	fn as_mut<'a>(cont: RefMut<'a, Self>) -> Self::RefMut<'a> {
+		if cont.is_some() {
+			Some(RefMut::map(cont, |c| c.as_mut().unwrap()))
+		} else {
+			None
+		}
 	}
 	fn delete(&mut self, _: &[usize]) {}
 }
@@ -64,14 +76,14 @@ impl<T: 'static> NewWith for Option<T> {
 	fn new_with(&mut self, _: Self::Args) {}
 }
 impl<T: 'static> Container for Vec<T> {
-	type Slice = [T];
-	type Item = T;
+	type Ref<'a> = Ref<'a, [T]>;
+	type RefMut<'a> = RefMut<'a, [T]>;
 
-	fn as_ref(&self) -> &Self::Slice {
-		self
+	fn as_ref<'a>(cont: Ref<'a, Self>) -> Self::Ref<'a> {
+		Ref::map(cont, |c| c.as_slice())
 	}
-	fn as_mut(&mut self) -> &mut Self::Slice {
-		self
+	fn as_mut<'a>(cont: RefMut<'a, Self>) -> Self::RefMut<'a> {
+		RefMut::map(cont, |c| c.as_mut_slice())
 	}
 	fn delete(&mut self, indices: &[usize]) {
 		for &index in indices {
@@ -95,14 +107,14 @@ impl<T: 'static> NewWith for Vec<T> {
 	}
 }
 impl<T: 'static + Hash + Eq> Container for IndexSet<T> {
-	type Slice = Self;
-	type Item = T;
+	type Ref<'a> = Ref<'a, Self>;
+	type RefMut<'a> = RefMut<'a, Self>;
 
-	fn as_ref(&self) -> &Self::Slice {
-		self
+	fn as_ref<'a>(cont: Ref<'a, Self>) -> Self::Ref<'a> {
+		cont
 	}
-	fn as_mut(&mut self) -> &mut Self::Slice {
-		self
+	fn as_mut<'a>(cont: RefMut<'a, Self>) -> Self::RefMut<'a> {
+		cont
 	}
 	fn delete(&mut self, indices: &[usize]) {
 		for &index in indices {
@@ -118,14 +130,14 @@ impl<T: 'static + Hash + Eq> NewWith for IndexSet<T> {
 	}
 }
 impl<T: 'static> Container for OneOrMany<T> {
-	type Slice = [T];
-	type Item = T;
+	type Ref<'a> = Ref<'a, [T]>;
+	type RefMut<'a> = RefMut<'a, [T]>;
 
-	fn as_ref(&self) -> &Self::Slice {
-		self.as_slice()
+	fn as_ref<'a>(cont: Ref<'a, Self>) -> Self::Ref<'a> {
+		Ref::map(cont, |c| c.as_slice())
 	}
-	fn as_mut(&mut self) -> &mut Self::Slice {
-		self.as_mut_slice()
+	fn as_mut<'a>(cont: RefMut<'a, Self>) -> Self::RefMut<'a> {
+		RefMut::map(cont, |c| c.as_mut_slice())
 	}
 	fn delete(&mut self, indices: &[usize]) {
 		if let OneOrMany::Many(vec) = self {
@@ -150,14 +162,14 @@ impl<T: 'static> NewWith for OneOrMany<T> {
 	}
 }
 impl Container for BitVec {
-	type Slice = BitSlice;
-	type Item = bool;
+	type Ref<'a> = Ref<'a, BitSlice>;
+	type RefMut<'a> = RefMut<'a, BitSlice>;
 
-	fn as_ref(&self) -> &Self::Slice {
-		self
+	fn as_ref<'a>(cont: Ref<'a, Self>) -> Self::Ref<'a> {
+		Ref::map(cont, |c| c.as_bitslice())
 	}
-	fn as_mut(&mut self) -> &mut Self::Slice {
-		self
+	fn as_mut<'a>(cont: RefMut<'a, Self>) -> Self::RefMut<'a> {
+		RefMut::map(cont, |c| c.as_mut_bitslice())
 	}
 	fn delete(&mut self, indices: &[usize]) {
 		for &index in indices {

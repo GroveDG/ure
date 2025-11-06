@@ -47,7 +47,7 @@ component!(pub Windows: Vec<Arc<Window>>, new_windows as fn(_, _, _), Vec<Window
 pub fn new_windows(
 	ContMut(mut windows): ContMut<Windows>,
 	CompRef(app_proxy): CompRef<Proxy>,
-	args: &NewArgs,
+	args: &mut NewArgs,
 ) {
 	let attrs = args
 		.take::<Windows>()
@@ -64,7 +64,7 @@ pub fn new_window_exits(
 	Len(len): Len,
 	ContMut(mut window_exits): ContMut<WindowExits>,
 	CompRef((windows, app_proxy)): CompRef<(Windows, Proxy)>,
-	args: &NewArgs,
+	args: &mut NewArgs,
 ) {
 	window_exits.append(
 		&mut app_proxy.recv_exits(
@@ -80,7 +80,7 @@ pub fn new_window_ids(
 	Len(len): Len,
 	ContMut(mut window_ids): ContMut<WindowIds>,
 	CompRef(windows): CompRef<Windows>,
-	args: &NewArgs,
+	args: &mut NewArgs,
 ) {
 	for i in len..len + args.num() {
 		window_ids.push(windows[i].id());
@@ -92,7 +92,7 @@ pub fn new_surfaces(
 	Len(len): Len,
 	ContMut(mut surfaces): ContMut<Surfaces>,
 	CompRef(windows): CompRef<Windows>,
-	args: &NewArgs,
+	args: &mut NewArgs,
 ) {
 	for i in len..len + args.num() {
 		surfaces.push(GPU.instance.create_surface(windows[i].clone()).unwrap());
@@ -126,7 +126,7 @@ impl<Key: slotmap::Key> WindowSystem<Key> {
 			if let Some(group) = data.get(key) {
 				let mut group = group.borrow_mut();
 				if let Some(delete) =
-					(close_windows as fn(_, _) -> Vec<usize>).call_method(&group, ())
+					(close_windows as fn(_, _) -> Vec<usize>).call_method(&group, &mut ())
 				{
 					group.delete(&delete);
 					all_closed &= group.is_empty();
@@ -139,7 +139,7 @@ impl<Key: slotmap::Key> WindowSystem<Key> {
 		for key in self.keys.iter().copied() {
 			if let Some(group) = data.get(key) {
 				let group = group.borrow();
-				(reconfigure_surfaces as fn(_, _, _, _)).call_method(&group, ());
+				(reconfigure_surfaces as fn(_, _, _, _)).call_method(&group, &mut ());
 			}
 		}
 	}
@@ -147,13 +147,13 @@ impl<Key: slotmap::Key> WindowSystem<Key> {
 		for key in self.keys.iter().copied() {
 			if let Some(group) = data.get(key) {
 				let group = group.borrow();
-				(present_surfaces as fn(_, _)).call_method(&group, ());
+				(present_surfaces as fn(_, _)).call_method(&group, &mut ());
 			}
 		}
 	}
 }
 
-pub fn close_windows(CompRef(window_exits): CompRef<WindowExits>, _: ()) -> Vec<usize> {
+pub fn close_windows(CompRef(window_exits): CompRef<WindowExits>, _: &mut ()) -> Vec<usize> {
 	let mut delete = Vec::new();
 	for (i, c) in window_exits.iter().enumerate() {
 		if c.load(std::sync::atomic::Ordering::Relaxed) {
@@ -166,7 +166,7 @@ pub fn reconfigure_surfaces(
 	Len(len): Len,
 	CompRef((windows, surfaces)): CompRef<(Windows, Surfaces)>,
 	CompMut((mut sizes, mut textures)): CompMut<(WindowSizes, SurfaceTextures)>,
-	_: (),
+	_: &mut (),
 ) {
 	for i in 0..len {
 		let window_size = windows[i].inner_size();
@@ -182,7 +182,7 @@ pub fn reconfigure_surfaces(
 		textures[i] = surfaces[i].get_current_texture().ok();
 	}
 }
-pub fn present_surfaces(CompMut(mut textures): CompMut<SurfaceTextures>, _: ()) {
+pub fn present_surfaces(CompMut(mut textures): CompMut<SurfaceTextures>, _: &mut ()) {
 	for texture in textures.iter_mut() {
 		if let Some(texture) = texture.take() {
 			texture.present();

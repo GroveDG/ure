@@ -1,12 +1,15 @@
 use std::sync::{Arc, LazyLock};
 
+use bitvec::slice::BitSlice;
 use color::palette::css::WHITE;
 use glam::{Affine2, Vec2};
+use itertools::izip;
 use ure_data::{
 	component,
 	components::{CompMut, CompRef, ContMut},
 	containers::OneOrMany,
 	group::{Data, NewArgs},
+	method::MethodTrait,
 	resource::Resource,
 };
 use wgpu::{
@@ -103,7 +106,7 @@ impl Instance2D {
 }
 
 component!(pub Colors: Vec<Srgba>, new_colors as fn(_, _), Vec<Srgba>);
-pub fn new_colors(ContMut(mut colors): ContMut<Colors>, args: &NewArgs) {
+pub fn new_colors(ContMut(mut colors): ContMut<Colors>, args: &mut NewArgs) {
 	if let Some(mut new_colors) = args.take::<Colors>() {
 		colors.append(&mut new_colors);
 	} else {
@@ -113,15 +116,26 @@ pub fn new_colors(ContMut(mut colors): ContMut<Colors>, args: &NewArgs) {
 component!(pub Transforms2D: Vec<Affine2>);
 component!(pub Instances2D: TypedBuffer<Instance2D>);
 pub fn update_instances_2d(
-	CompMut(mut instances): CompMut<Instances2D>,
-	CompRef(transforms): CompRef<Transforms2D>,
-	colors: Option<CompRef<Colors>>,
-	args: &NewArgs,
+	CompMut((mut instances, mut diff)): CompMut<Instances2D>,
+	CompRef((transforms, colors)): CompRef<(Transforms2D, Colors)>,
+	_: &mut (),
 ) {
-	instances.
+	for (diff, transform, color, instance) in izip!(
+		diff.iter(),
+		transforms.iter(),
+		colors.iter(),
+		instances.iter_mut(),
+	) {
+		if !diff {
+			continue;
+		}
+		instance.transform = transform.to_cols_array();
+		instance.color = color.to_rgba8();
+	}
+	diff.fill(false);
 }
 component!(pub Meshes2D: OneOrMany<Arc<Mesh2D>>, new_meshes_2d as fn(_, _), Vec<Arc<Mesh2D>>);
-pub fn new_meshes_2d(ContMut(mut meshes): ContMut<Meshes2D>, args: &NewArgs) {
+pub fn new_meshes_2d(ContMut(mut meshes): ContMut<Meshes2D>, args: &mut NewArgs) {
 	let OneOrMany::Many(vec) = &mut *meshes else {
 		return;
 	};
@@ -259,38 +273,35 @@ impl<Key: slotmap::Key> Visuals2D<Key> {
 			camera_buffer,
 		}
 	}
-	// pub fn render<'a>(&self, data: &mut Data<Key>, pass: &mut wgpu::RenderPass<'a>) {
-	// 	for key in self.keys {
-	// 		let Some(group) = data.get(key) else {
-	// 			continue;
-	// 		};
-	// 		let mut group = group.get_mut();
-	// 		let Some((mut instances, meshes)) =
-	// 			group.get_components_mut::<(Instances2D, Meshes2D)>()
-	// 		else {
-	// 			continue;
-	// 		};
-	// 	}
-	// 	GPU.queue.write_buffer(
-	// 		&self.instance_buffer,
-	// 		0,
-	// 		bytemuck::cast_slice(unsafe {
-	// 			std::mem::transmute::<&[std::mem::MaybeUninit<Instance2D>], &[Instance2D]>(
-	// 				&data.visual_2d.elements,
-	// 			)
-	// 		}),
-	// 	);
-	// 	pass.set_pipeline(&PIPELINE);
-	// 	pass.set_bind_group(0, &self.camera, &[]);
-	// 	pass.set_vertex_buffer(1, self.instance_buffer.slice(..)); // Instance buffer
-	// 	for span in self.spans.iter().copied() {
-	// 		let mut buffer_position = data.visual_2d.positions[span] as u32;
-	// 		let span = data.get_span(span);
-	// 		for mesh in span.mesh.unwrap().iter() {
-	// 			mesh.set(pass);
-	// 			pass.draw_indexed(0..mesh.indices, 0, buffer_position..buffer_position + 1);
-	// 			buffer_position += 1;
-	// 		}
-	// 	}
-	// }
+	pub fn render<'a>(&self, data: &mut Data<Key>, pass: &mut wgpu::RenderPass<'a>) {
+		for key in self.keys {
+			let Some(group) = data.get(key) else {
+				continue;
+			};
+
+			(update_instances_2d as fn(_, _, _)).call_method(&group.borrow(), &mut ());
+			(update_instances_2d as fn(_, _, _)).call_method(&group.borrow(), &mut ());
+		}
+		GPU.queue.write_buffer(
+			&self.instance_buffer,
+			0,
+			bytemuck::cast_slice(unsafe {
+				std::mem::transmute::<&[std::mem::MaybeUninit<Instance2D>], &[Instance2D]>(
+					&data.visual_2d.elements,
+				)
+			}),
+		);
+		pass.set_pipeline(&PIPELINE);
+		pass.set_bind_group(0, &self.camera, &[]);
+		pass.set_vertex_buffer(1, self.instance_buffer.slice(..)); // Instance buffer
+		for span in self.spans.iter().copied() {
+			let mut buffer_position = data.visual_2d.positions[span] as u32;
+			let span = data.get_span(span);
+			for mesh in span.mesh.unwrap().iter() {
+				mesh.set(pass);
+				pass.draw_indexed(0..mesh.indices, 0, buffer_position..buffer_position + 1);
+				buffer_position += 1;
+			}
+		}
+	}
 }

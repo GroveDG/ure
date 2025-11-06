@@ -8,7 +8,7 @@ use crate::{
 #[derive(Debug)]
 pub struct Method<Args, Return = ()> {
 	fn_ptr: fn(),
-	call_ptr: fn(fn(), &Group, Args) -> Option<Return>,
+	call_ptr: fn(fn(), &Group, &mut Args) -> Option<Return>,
 	dependencies: fn() -> Vec<ComponentId>,
 }
 impl<Args, Return> Clone for Method<Args, Return> {
@@ -22,17 +22,22 @@ impl<Args, Return> Clone for Method<Args, Return> {
 }
 impl<Args, Return> Copy for Method<Args, Return> {}
 impl<Args, Return> Method<Args, Return> {
-	pub const fn new<'a, F: Copy + MethodTrait<'a, Args, Return>>(fn_ptr: F) -> Self {
+	pub const fn new<'a, 'b, F: Copy + MethodTrait<'a, 'b, Args, Return>>(fn_ptr: F) -> Self
+	where
+		Args: 'b,
+	{
 		// assert_eq!(size_of::<F>(), size_of::<fn()>()); // Double check that F is a fn pointer.
 		unsafe {
 			Self {
 				fn_ptr: *(&fn_ptr as *const F as *const fn()), // Erase the fn type.
-				call_ptr: std::mem::transmute(F::call_method as fn(F, &'a Group, Args) -> Option<Return>), // Erase the fn type.
+				call_ptr: std::mem::transmute(
+					F::call_method as fn(F, &'a Group, &'b mut Args) -> Option<Return>,
+				), // Erase the fn type.
 				dependencies: F::dependencies,
 			}
 		}
 	}
-	pub fn call(&self, group: &Group, args: Args) -> Option<Return> {
+	pub fn call(&self, group: &Group, args: &mut Args) -> Option<Return> {
 		(self.call_ptr)(self.fn_ptr, group, args)
 	}
 	pub fn dependencies(&self) -> Vec<ComponentId> {
@@ -42,25 +47,25 @@ impl<Args, Return> Method<Args, Return> {
 		unsafe { std::mem::transmute(self) }
 	}
 }
-impl<'a, Args, F: MethodTrait<'a, Args> + Copy> From<F> for Method<Args> {
+impl<'a, 'b, Args: 'b, F: MethodTrait<'a, 'b, Args> + Copy> From<F> for Method<Args> {
 	fn from(value: F) -> Self {
 		Method::new(value)
 	}
 }
 
-pub trait MethodTrait<'a, Args, Return = ()>: ComponentDependency {
-	fn call_method(self, group: &'a Group, args: Args) -> Option<Return>;
+pub trait MethodTrait<'a, 'b, Args, Return = ()>: ComponentDependency {
+	fn call_method(self, group: &'a Group, args: &'b mut Args) -> Option<Return>;
 }
 pub trait FromGroup<'a>: ComponentDependency {
 	fn from_group(group: &'a Group) -> Option<Self>
 	where
-		Self: 'a + Sized;
+		Self: Sized;
 }
 
 #[macro_export]
 macro_rules! impl_method {
 	($($C:ident),*) => {
-impl<$($C,)* Args, Return> ComponentDependency for fn($($C,)* Args) -> Return
+impl<'b, $($C,)* Args, Return> ComponentDependency for fn($($C,)* &'b mut Args) -> Return
 where
 	$(
 	$C: $crate::method::ComponentDependency,
@@ -76,14 +81,14 @@ where
 	}
 }
 #[allow(non_snake_case)]
-impl<'a, $($C,)* Args, Return> MethodTrait<'a, Args, Return> for fn($($C,)* Args) -> Return
+impl<'a, 'b, $($C,)* Args: 'b, Return> MethodTrait<'a, 'b, Args, Return> for fn($($C,)* &'b mut Args) -> Return
 where
 	$(
-	$C: 'a + FromGroup<'a>,
+	$C: FromGroup<'a>,
 	)*
 {
 	#[allow(unused_variables)]
-	fn call_method(self, group: &'a Group, args: Args) -> Option<Return> {
+	fn call_method(self, group: &'a Group, args: &'b mut Args) -> Option<Return> {
 		$(
 		let $C = <$C as $crate::method::FromGroup>::from_group(group)?;
 		)*

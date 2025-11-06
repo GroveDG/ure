@@ -1,5 +1,8 @@
+use std::cell::{Ref, RefMut};
+use std::ops::{Deref, DerefMut};
 use std::{marker::PhantomData, sync::OnceLock};
 
+use bitvec::slice::BitSlice;
 use bitvec::vec::BitVec;
 use bytemuck::Pod;
 use ure_data::containers::{Container, NewDefault, NewWith};
@@ -7,6 +10,7 @@ use wgpu::{
 	Adapter, Buffer, BufferUsages, CommandEncoder, Device, DeviceDescriptor, Instance,
 	InstanceDescriptor, Queue, RequestAdapterOptions, TextureFormat, wgt::BufferDescriptor,
 };
+use wgpu::{BufferView, BufferViewMut, CommandBuffer};
 
 pub static GPU: std::sync::LazyLock<Gpu> =
 	std::sync::LazyLock::new(|| futures::executor::block_on(Gpu::new()));
@@ -92,15 +96,28 @@ impl<T: Pod> TypedBuffer<T> {
 	}
 }
 impl<T: Pod> Container for TypedBuffer<T> {
-	type Slice = [T];
-	type Item = T;
+	type Ref<'a> = (TypedBufferView<T>, Ref<'a, BitSlice>);
+	type RefMut<'a> = (TypedBufferViewMut<T>, RefMut<'a, BitSlice>);
 
-	fn as_ref(&self) -> &Self::Slice {
-		self.inner.get_mapped_range(..)
+	fn as_ref<'a>(cont: std::cell::Ref<'a, Self>) -> Self::Ref<'a> {
+		(
+			TypedBufferView {
+				buffer: cont.inner.clone(),
+				inner: cont.inner.get_mapped_range(..),
+				_marker: PhantomData::<T>,
+			},
+			Ref::map(cont, |c| c.diff.as_bitslice()),
+		)
 	}
-
-	fn as_mut(&mut self) -> &mut Self::Slice {
-		unsafe { std::mem::transmute(self) }
+	fn as_mut<'a>(cont: std::cell::RefMut<'a, Self>) -> Self::RefMut<'a> {
+		(
+			TypedBufferViewMut {
+				buffer: cont.inner.clone(),
+				inner: cont.inner.get_mapped_range_mut(..),
+				_marker: PhantomData::<T>,
+			},
+			RefMut::map(cont, |c| c.diff.as_mut_bitslice()),
+		)
 	}
 	fn delete(&mut self, indices: &[usize]) {
 		self.diff.reserve(indices.len());
@@ -122,5 +139,46 @@ impl<T: Pod + Default> NewWith for TypedBuffer<T> {
 
 	fn new_with(&mut self, _: Self::Args) {
 		panic!("Do not call 'new_with' on TypedBuffers.")
+	}
+}
+
+pub struct TypedBufferView<T: Pod> {
+	inner: BufferView,
+	buffer: Buffer,
+	_marker: PhantomData<T>,
+}
+impl<T: Pod> Deref for TypedBufferView<T> {
+	type Target = [T];
+
+	fn deref(&self) -> &Self::Target {
+		bytemuck::cast_slice(&self.inner)
+	}
+}
+impl<T: Pod> Drop for TypedBufferView<T> {
+	fn drop(&mut self) {
+		self.buffer.unmap();
+	}
+}
+
+pub struct TypedBufferViewMut<T: Pod> {
+	inner: BufferViewMut,
+	buffer: Buffer,
+	_marker: PhantomData<T>,
+}
+impl<T: Pod> Deref for TypedBufferViewMut<T> {
+	type Target = [T];
+
+	fn deref(&self) -> &Self::Target {
+		bytemuck::cast_slice(&self.inner)
+	}
+}
+impl<T: Pod> DerefMut for TypedBufferViewMut<T> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		bytemuck::cast_slice_mut(&mut self.inner)
+	}
+}
+impl<T: Pod> Drop for TypedBufferViewMut<T> {
+	fn drop(&mut self) {
+		self.buffer.unmap();
 	}
 }

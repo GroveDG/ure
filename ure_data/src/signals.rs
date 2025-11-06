@@ -29,10 +29,10 @@ pub struct Signal {
 	methods: SlotMap<ConnectionId, Method<()>>,
 }
 impl Signal {
-	pub unsafe fn call<Args: Clone>(&self, group: &Group, args: Args) {
+	pub unsafe fn call<Args>(&self, group: &Group, mut args: Args) {
 		for method in self.methods.values() {
 			unsafe { std::mem::transmute::<&Method<()>, &Method<Args>>(method) }
-				.call(group, args.clone());
+				.call(group, &mut args);
 		}
 	}
 	pub unsafe fn connect(&mut self, method: Method<()>) -> ConnectionId {
@@ -52,7 +52,7 @@ pub struct Signals {
 	inner: HashMap<u64, Signal, BuildNoHashHasher<u64>>,
 }
 impl Signals {
-	pub fn connect<Args: Clone>(&mut self, signal_id: &SignalId<Args>, method: Method<Args>) {
+	pub fn connect<Args>(&mut self, signal_id: &SignalId<Args>, method: Method<Args>) {
 		let Some(signal) = self.inner.get_mut(&signal_id.0) else {
 			let mut signal = Signal::default();
 			unsafe { signal.connect(method.erase()) };
@@ -63,7 +63,7 @@ impl Signals {
 			signal.connect(method.erase());
 		}
 	}
-	pub fn call<Args: Clone>(&self, signal_id: &SignalId<Args>, group: &Group, args: Args) {
+	pub fn call<Args>(&self, signal_id: &SignalId<Args>, group: &Group, args: Args) {
 		let Some(signal) = self.inner.get(&signal_id.0) else {
 			return;
 		};

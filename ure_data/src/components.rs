@@ -32,7 +32,7 @@ pub trait Component: Sized {
 	const ID: ComponentId;
 	type Container: Container;
 
-	const NEW: Method<&NewArgs>;
+	const NEW: Method<NewArgs>;
 	const DELETE: Method<&[usize]>;
 
 	type NewArg;
@@ -56,7 +56,7 @@ impl $crate::components::Component for $name {
 	const ID: $crate::components::ComponentId = $crate::components::ComponentId::new(std::module_path!(), stringify!($name));
 	type Container = $container;
 
-	const NEW: $crate::method::Method<&$crate::group::NewArgs> = $crate::method::Method::new($crate::components::default_new::<Self, $container> as fn(_, _));
+	const NEW: $crate::method::Method<$crate::group::NewArgs> = $crate::method::Method::new($crate::components::default_new::<Self, $container> as fn(_, _));
 	const DELETE: $crate::method::Method<&[usize]> = $crate::method::Method::new($crate::components::default_delete::<Self> as fn(_, _));
 
 	type NewArg = <Self::Container as $crate::containers::NewWith>::Args;
@@ -68,7 +68,7 @@ impl $crate::components::Component for $name {
 	const ID: $crate::components::ComponentId = $crate::components::ComponentId::new(std::module_path!(), stringify!($name));
 	type Container = $container;
 
-	const NEW: $crate::method::Method<&$crate::group::NewArgs> = $crate::method::Method::new($new);
+	const NEW: $crate::method::Method<$crate::group::NewArgs> = $crate::method::Method::new($new);
 	const DELETE: $crate::method::Method<&[usize]> = $crate::method::Method::new($crate::components::default_delete::<Self> as fn(_, _));
 
 	type NewArg = $new_arg;
@@ -76,11 +76,11 @@ impl $crate::components::Component for $name {
 	};
 }
 
-pub fn default_new<C, Cont>(ContMut(mut container): ContMut<C>, args: &NewArgs)
+pub fn default_new<C, Cont>(ContMut(mut container): ContMut<C>, args: &mut NewArgs)
 where
 	Cont: Container,
 	Cont: NewWith + NewDefault,
-	C: Component<Container = Cont, NewArg = <Cont as NewWith>::Args>
+	C: Component<Container = Cont, NewArg = <Cont as NewWith>::Args>,
 {
 	assert_eq!(
 		TypeId::of::<C::NewArg>(),
@@ -93,7 +93,7 @@ where
 	}
 }
 
-pub fn default_delete<C: Component>(ContMut(mut container): ContMut<C>, indices: &[usize]) {
+pub fn default_delete<C: Component>(ContMut(mut container): ContMut<C>, indices: &mut &[usize]) {
 	container.delete(indices);
 }
 
@@ -105,33 +105,43 @@ impl Components {
 	pub fn add<C: Component>(&mut self, container: C::Container) {
 		self.inner.insert(C::ID, RefCell::new(Box::new(container)));
 	}
-	pub fn borrow_container<C: Component>(&'_ self) -> Option<cell::Ref<'_, C::Container>> {
-		cell::Ref::filter_map(self.inner.get(&C::ID)?.try_borrow().ok()?, |c| {
-			Some(c.downcast_ref::<C::Container>()?)
-		})
-		.ok()
+	pub fn borrow_container<C: Component>(&'_ self) -> Option<std::cell::Ref<'_, C::Container>> {
+		Some(
+			cell::Ref::filter_map(self.inner.get(&C::ID)?.borrow(), |c| {
+				Some(c.downcast_ref::<C::Container>()?)
+			})
+			.unwrap(),
+		)
 	}
-	pub fn borrow_container_mut<C: Component>(&'_ self) -> Option<cell::RefMut<'_, C::Container>> {
-		cell::RefMut::filter_map(self.inner.get(&C::ID)?.try_borrow_mut().ok()?, |c| {
-			Some(c.downcast_mut::<C::Container>()?)
-		})
-		.ok()
+	pub fn borrow_container_mut<C: Component>(
+		&'_ self,
+	) -> Option<std::cell::RefMut<'_, C::Container>> {
+		Some(
+			cell::RefMut::filter_map(self.inner.get(&C::ID)?.borrow_mut(), |c| {
+				Some(c.downcast_mut::<C::Container>()?)
+			})
+			.unwrap(),
+		)
 	}
 	pub fn borrow_component<C: Component>(
 		&'_ self,
-	) -> Option<cell::Ref<'_, <C::Container as Container>::Slice>> {
-		cell::Ref::filter_map(self.inner.get(&C::ID)?.try_borrow().ok()?, |c| {
-			Some(c.downcast_ref::<C::Container>()?.as_ref())
-		})
-		.ok()
+	) -> Option<<C::Container as Container>::Ref<'_>> {
+		Some(<C::Container as Container>::as_ref(
+			cell::Ref::filter_map(self.inner.get(&C::ID)?.borrow(), |c| {
+				Some(c.downcast_ref::<C::Container>()?)
+			})
+			.unwrap(),
+		))
 	}
 	pub fn borrow_component_mut<C: Component>(
 		&'_ self,
-	) -> Option<cell::RefMut<'_, <C::Container as Container>::Slice>> {
-		cell::RefMut::filter_map(self.inner.get(&C::ID)?.try_borrow_mut().ok()?, |c| {
-			Some(c.downcast_mut::<C::Container>()?.as_mut())
-		})
-		.ok()
+	) -> Option<<C::Container as Container>::RefMut<'_>> {
+		Some(<C::Container as Container>::as_mut(
+			cell::RefMut::filter_map(self.inner.get(&C::ID)?.borrow_mut(), |c| {
+				Some(c.downcast_mut::<C::Container>()?)
+			})
+			.unwrap(),
+		))
 	}
 	pub fn contains(&self, id: &ComponentId) -> bool {
 		self.inner.contains_key(id)
@@ -170,13 +180,13 @@ impl<$($C: Component),*> ComponentGroup for ($($C),*) {
 		Some(($( group.borrow_container_mut::<$C>()? ),*))
 	}
 	type ComponentsRef<'a> = (
-		$(std::cell::Ref<'a, <<$C as Component>::Container as Container>::Slice>),*
+		$(<<$C as Component>::Container as Container>::Ref<'a>),*
 	);
 	fn borrow_components(group: &Group) -> Option<Self::ComponentsRef<'_>> {
 		Some(($( group.borrow_component::<$C>()? ),*))
 	}
 	type ComponentsRefMut<'a> = (
-		$(std::cell::RefMut<'a, <<$C as Component>::Container as Container>::Slice>),*
+		$(<<$C as Component>::Container as Container>::RefMut<'a>),*
 	);
 	fn borrow_components_mut(group: &Group) -> Option<Self::ComponentsRefMut<'_>> {
 		Some(($( group.borrow_component_mut::<$C>()? ),*))
@@ -192,7 +202,7 @@ impl<'a, C: ComponentGroup> ComponentDependency for ContRef<'a, C> {
 		C::IDS.to_vec()
 	}
 }
-impl<'a, C: ComponentGroup> FromGroup<'a> for ContRef<'a, C> {
+impl<'a: 'b, 'b, C: ComponentGroup> FromGroup<'a> for ContRef<'a, C> {
 	fn from_group(group: &'a Group) -> Option<Self>
 	where
 		Self: Sized,

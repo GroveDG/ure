@@ -22,7 +22,7 @@ pub struct Group {
 	signals: Signals,
 }
 
-signal!(pub NEW: &NewArgs);
+signal!(pub NEW: NewArgs);
 signal!(pub DELETE: &[usize]);
 
 #[derive(Debug, Copy, Clone)]
@@ -62,11 +62,12 @@ impl Group {
 		}
 	}
 	fn new_args(&mut self, args: NewArgs) {
-		if args.num() == 0 {
+		let num = args.num();
+		if num == 0 {
 			return;
 		}
-		self.signals.call(&NEW, self, &args);
-		self.len += args.num();
+		self.signals.call(&NEW, self, args);
+		self.len += num;
 	}
 	pub fn delete(&mut self, indices: &[usize]) {
 		if indices.len() == 0 {
@@ -83,12 +84,12 @@ impl Group {
 	}
 	pub fn borrow_component<C: Component>(
 		&'_ self,
-	) -> Option<Ref<'_, <C::Container as Container>::Slice>> {
+	) -> Option<<C::Container as Container>::Ref<'_>> {
 		self.components.borrow_component::<C>()
 	}
 	pub fn borrow_component_mut<C: Component>(
 		&'_ self,
-	) -> Option<RefMut<'_, <C::Container as Container>::Slice>> {
+	) -> Option<<C::Container as Container>::RefMut<'_>> {
 		self.components.borrow_component_mut::<C>()
 	}
 	pub fn len(&self) -> usize {
@@ -132,7 +133,7 @@ impl<'a> FromGroup<'a> for Len {
 
 pub struct NewArgs {
 	num: usize,
-	map: HashMap<ComponentId, Cell<Option<Box<dyn Any>>>, BuildNoHashHasher<ComponentId>>,
+	map: HashMap<ComponentId, Box<dyn Any>, BuildNoHashHasher<ComponentId>>,
 }
 impl NewArgs {
 	pub fn new(num: usize) -> Self {
@@ -141,18 +142,17 @@ impl NewArgs {
 			map: Default::default(),
 		}
 	}
-	pub fn take<C: Component>(&self) -> Option<C::NewArg>
+	pub fn take<C: Component>(&mut self) -> Option<C::NewArg>
 	where
 		C::NewArg: 'static,
 	{
-		let cell = self.map.get(&C::ID)?;
-		Some(*cell.take().unwrap().downcast().unwrap())
+		Some(*self.map.remove(&C::ID)?.downcast().unwrap())
 	}
 	pub fn add<C: Component>(&mut self, args: C::NewArg)
 	where
 		C::NewArg: 'static,
 	{
-		self.map.insert(C::ID, Cell::new(Some(Box::new(args)))); // TODO: Validate Args
+		self.map.insert(C::ID, Box::new(args)); // TODO: Validate Args
 	}
 	pub fn num(&self) -> usize {
 		self.num

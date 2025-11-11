@@ -1,15 +1,17 @@
 use std::{
-	any::{Any, TypeId},
+	any::Any,
 	cell::{self, RefCell},
 	collections::HashMap,
+	error::Error,
+	fmt::Display,
 };
 
 use nohash_hasher::BuildNoHashHasher;
 
 use crate::{
-	containers::{Container, NewDefault, NewWith},
-	group::{Group, NewArgs},
-	method::{FromGroup, Method},
+	containers::{Container, NewDefault},
+	glob::{ContMut, GlobItemRef},
+	group::Group,
 	util::all_the_tuples,
 };
 
@@ -26,25 +28,30 @@ impl ComponentId {
 
 pub trait ComponentDependency {
 	fn dependencies() -> Vec<ComponentId>;
+	fn method_dependencies(&self) -> Vec<ComponentId> {
+		Self::dependencies()
+	}
 }
 
-pub trait Component: Sized {
+pub trait Component: Sized + ComponentDependency + 'static {
 	const ID: ComponentId;
 	type Container: Container;
 
-	const NEW: Method<NewArgs>;
-	const DELETE: Method<&[usize]>;
-
-	type NewArg;
+	type NewArg: Sized + 'static;
+	fn new(glob: GlobItemRef<'_>, args: &mut NewArgs) -> Result<(), Box<dyn Error>>;
+	fn delete(glob: GlobItemRef<'_>, indices: &mut &[usize]) -> Result<(), Box<dyn Error>>;
 }
-impl<C: Component> ComponentDependency for C {
-	fn dependencies() -> Vec<ComponentId> {
-		C::NEW
-			.dependencies()
-			.into_iter()
-			.chain(C::DELETE.dependencies().into_iter())
-			.filter(|&c| c != C::ID)
-			.collect()
+
+pub struct NewArgs {
+	len: usize,
+	args: HashMap<ComponentId, Box<dyn Any>, BuildNoHashHasher<ComponentId>>,
+}
+impl NewArgs {
+	pub const fn len(&self) -> usize {
+		self.len
+	}
+	pub fn take<C: Component>(&mut self) -> Option<C::NewArg> {
+		Some(*self.args.remove(&C::ID)?.downcast().unwrap())
 	}
 }
 
@@ -52,49 +59,62 @@ impl<C: Component> ComponentDependency for C {
 macro_rules! component {
 	($v:vis $name:ident: $container:ty) => {
 $v struct $name;
-impl $crate::components::Component for $name {
-	const ID: $crate::components::ComponentId = $crate::components::ComponentId::new(std::module_path!(), stringify!($name));
-	type Container = $container;
-
-	const NEW: $crate::method::Method<$crate::group::NewArgs> = $crate::method::Method::new($crate::components::default_new::<Self, $container> as fn(_, _));
-	const DELETE: $crate::method::Method<&[usize]> = $crate::method::Method::new($crate::components::default_delete::<Self> as fn(_, _));
-
-	type NewArg = <Self::Container as $crate::containers::NewWith>::Args;
-}
-	};
-	($v:vis $name:ident: $container:ty, $new:expr, $new_arg:ty) => {
-$v struct $name;
-impl $crate::components::Component for $name {
-	const ID: $crate::components::ComponentId = $crate::components::ComponentId::new(std::module_path!(), stringify!($name));
-	type Container = $container;
-
-	const NEW: $crate::method::Method<$crate::group::NewArgs> = $crate::method::Method::new($new);
-	const DELETE: $crate::method::Method<&[usize]> = $crate::method::Method::new($crate::components::default_delete::<Self> as fn(_, _));
-
-	type NewArg = $new_arg;
-}
-	};
-}
-
-pub fn default_new<C, Cont>(ContMut(mut container): ContMut<C>, args: &mut NewArgs)
-where
-	Cont: Container,
-	Cont: NewWith + NewDefault,
-	C: Component<Container = Cont, NewArg = <Cont as NewWith>::Args>,
-{
-	assert_eq!(
-		TypeId::of::<C::NewArg>(),
-		TypeId::of::<<C::Container as NewWith>::Args>()
-	);
-	if let Some(args) = args.take::<C>() {
-		container.new_with(unsafe { std::mem::transmute(args) });
-	} else {
-		container.new_default(args.num())
+impl $crate::components::ComponentDependency for $name {
+	fn dependencies() -> Vec<$crate::components::ComponentId> {
+		Vec::new()
 	}
 }
+impl $crate::components::Component for $name {
+	const ID: $crate::components::ComponentId = $crate::components::ComponentId::new(std::module_path!(), stringify!($name));
+	type Container = $container;
 
-pub fn default_delete<C: Component>(ContMut(mut container): ContMut<C>, indices: &mut &[usize]) {
-	container.delete(indices);
+	type NewArg = ();
+
+	fn new<'a>(glob: $crate::glob::GlobItemRef<'a>, args: &mut $crate::components::NewArgs) -> Result<(), Box<dyn std::error::Error>> {
+		$crate::components::new_default::<Self>.call_method(glob, args)
+	}
+	fn delete(glob: $crate::glob::GlobItemRef<'_>, indices: &mut &[usize]) -> Result<(), Box<dyn std::error::Error>> {
+		$crate::components::delete_default::<Self>.call_method(glob, indices)
+	}
+}
+	};
+	($v:vis $name:ident: $container:ty, $new:expr $(, $new_arg:ty)?) => {
+$v struct $name;
+impl $crate::components::ComponentDependency for $name {
+	fn dependencies() -> Vec<$crate::components::ComponentId> {
+		<&dyn $crate::method::MethodTrait<_, _, _>>::method_dependencies(&(&$new as &dyn $crate::method::MethodTrait<_, _, _>))
+	}
+}
+impl $crate::components::Component for $name {
+	const ID: $crate::components::ComponentId = $crate::components::ComponentId::new(std::module_path!(), stringify!($name));
+	type Container = $container;
+
+	type NewArg = ($($new_arg)?);
+	fn new<'a>(glob: $crate::glob::GlobItemRef<'a>, args: &mut $crate::components::NewArgs) -> Result<(), Box<dyn std::error::Error>> {
+		($new).call_method(glob, args)
+	}
+	fn delete(glob: $crate::glob::GlobItemRef<'_>, indices: &mut &[usize]) -> Result<(), Box<dyn std::error::Error>> {
+		$crate::components::delete_default::<Self>.call_method(glob, indices)
+	}
+}
+	};
+}
+
+pub fn new_default<C: Component>(ContMut(mut c): ContMut<C>, args: &mut NewArgs)
+where
+	for<'a> C: ComponentGroup<ContainersRefMut<'a> = std::cell::RefMut<'a, C::Container>>,
+	C::Container: NewDefault,
+{
+	c.new_default(args.len());
+}
+
+pub fn delete_default<C: ComponentGroup + Component>(
+	ContMut(mut c): ContMut<C>,
+	indices: &mut &[usize],
+) where
+	for<'a> C: ComponentGroup<ContainersRefMut<'a> = std::cell::RefMut<'a, C::Container>>,
+{
+	c.delete(indices);
 }
 
 #[derive(Debug, Default)]
@@ -148,16 +168,30 @@ impl Components {
 	}
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct MissingDependency(pub ComponentId);
+impl Display for MissingDependency {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{:?}", self.0)
+	}
+}
+impl Error for MissingDependency {}
+
 pub trait ComponentGroup {
 	const IDS: &'static [ComponentId];
+
 	type ContainersRef<'a>;
-	fn borrow_containers(group: &Group) -> Option<Self::ContainersRef<'_>>;
+	fn borrow_containers(group: &Group) -> Result<Self::ContainersRef<'_>, MissingDependency>;
 	type ContainersRefMut<'a>;
-	fn borrow_containers_mut(group: &Group) -> Option<Self::ContainersRefMut<'_>>;
+	fn borrow_containers_mut(
+		group: &Group,
+	) -> Result<Self::ContainersRefMut<'_>, MissingDependency>;
 	type ComponentsRef<'a>;
-	fn borrow_components(group: &Group) -> Option<Self::ComponentsRef<'_>>;
+	fn borrow_components(group: &Group) -> Result<Self::ComponentsRef<'_>, MissingDependency>;
 	type ComponentsRefMut<'a>;
-	fn borrow_components_mut(group: &Group) -> Option<Self::ComponentsRefMut<'_>>;
+	fn borrow_components_mut(
+		group: &Group,
+	) -> Result<Self::ComponentsRefMut<'_>, MissingDependency>;
 }
 
 macro_rules! impl_component_group {
@@ -167,101 +201,32 @@ impl<$($C: Component),*> ComponentGroup for ($($C),*) {
 	const IDS: &'static [ComponentId] = &[
 		$(<$C as Component>::ID),*
 	];
+
 	type ContainersRef<'a> = (
 		$(std::cell::Ref<'a, <$C as Component>::Container>),*
 	);
-	fn borrow_containers(group: &Group) -> Option<Self::ContainersRef<'_>> {
-		Some(($( group.borrow_container::<$C>()? ),*))
+	fn borrow_containers(group: &Group) -> Result<Self::ContainersRef<'_>, MissingDependency> {
+		Ok(($( group.borrow_container::<$C>().ok_or(MissingDependency(<$C as Component>::ID))? ),*))
 	}
 	type ContainersRefMut<'a> = (
 		$(std::cell::RefMut<'a, <$C as Component>::Container>),*
 	);
-	fn borrow_containers_mut(group: &Group) -> Option<Self::ContainersRefMut<'_>> {
-		Some(($( group.borrow_container_mut::<$C>()? ),*))
+	fn borrow_containers_mut(group: &Group) -> Result<Self::ContainersRefMut<'_>, MissingDependency> {
+		Ok(($( group.borrow_container_mut::<$C>().ok_or(MissingDependency(<$C as Component>::ID))? ),*))
 	}
 	type ComponentsRef<'a> = (
 		$(<<$C as Component>::Container as Container>::Ref<'a>),*
 	);
-	fn borrow_components(group: &Group) -> Option<Self::ComponentsRef<'_>> {
-		Some(($( group.borrow_component::<$C>()? ),*))
+	fn borrow_components(group: &Group) -> Result<Self::ComponentsRef<'_>, MissingDependency> {
+		Ok(($( group.borrow_component::<$C>().ok_or(MissingDependency(<$C as Component>::ID))? ),*))
 	}
 	type ComponentsRefMut<'a> = (
 		$(<<$C as Component>::Container as Container>::RefMut<'a>),*
 	);
-	fn borrow_components_mut(group: &Group) -> Option<Self::ComponentsRefMut<'_>> {
-		Some(($( group.borrow_component_mut::<$C>()? ),*))
+	fn borrow_components_mut(group: &Group) -> Result<Self::ComponentsRefMut<'_>, MissingDependency> {
+		Ok(($( group.borrow_component_mut::<$C>().ok_or(MissingDependency(<$C as Component>::ID))? ),*))
 	}
 }
 	};
 }
 all_the_tuples!(impl_component_group);
-
-pub struct ContRef<'a, C: ComponentGroup>(pub C::ContainersRef<'a>);
-impl<'a, C: ComponentGroup> ComponentDependency for ContRef<'a, C> {
-	fn dependencies() -> Vec<ComponentId> {
-		C::IDS.to_vec()
-	}
-}
-impl<'a: 'b, 'b, C: ComponentGroup> FromGroup<'a> for ContRef<'a, C> {
-	fn from_group(group: &'a Group) -> Option<Self>
-	where
-		Self: Sized,
-	{
-		Some(Self(C::borrow_containers(group)?))
-	}
-}
-pub struct ContMut<'a, C: ComponentGroup>(pub C::ContainersRefMut<'a>);
-impl<'a, C: ComponentGroup> ComponentDependency for ContMut<'a, C> {
-	fn dependencies() -> Vec<ComponentId> {
-		C::IDS.to_vec()
-	}
-}
-impl<'a, C: ComponentGroup> FromGroup<'a> for ContMut<'a, C> {
-	fn from_group(group: &'a Group) -> Option<Self>
-	where
-		Self: Sized,
-	{
-		Some(Self(C::borrow_containers_mut(group)?))
-	}
-}
-pub struct CompRef<'a, C: ComponentGroup>(pub C::ComponentsRef<'a>);
-impl<'a, C: ComponentGroup> ComponentDependency for CompRef<'a, C> {
-	fn dependencies() -> Vec<ComponentId> {
-		C::IDS.to_vec()
-	}
-}
-impl<'a, C: ComponentGroup> FromGroup<'a> for CompRef<'a, C> {
-	fn from_group(group: &'a Group) -> Option<Self>
-	where
-		Self: Sized,
-	{
-		Some(Self(C::borrow_components(group)?))
-	}
-}
-impl<'a, C: ComponentGroup> ComponentDependency for CompMut<'a, C> {
-	fn dependencies() -> Vec<ComponentId> {
-		C::IDS.to_vec()
-	}
-}
-pub struct CompMut<'a, C: ComponentGroup>(pub C::ComponentsRefMut<'a>);
-impl<'a, C: ComponentGroup> FromGroup<'a> for CompMut<'a, C> {
-	fn from_group(group: &'a Group) -> Option<Self>
-	where
-		Self: Sized,
-	{
-		Some(Self(C::borrow_components_mut(group)?))
-	}
-}
-impl<'a, C: 'a + FromGroup<'a>> ComponentDependency for Option<C> {
-	fn dependencies() -> Vec<ComponentId> {
-		Vec::new()
-	}
-}
-impl<'a, C: 'a + FromGroup<'a>> FromGroup<'a> for Option<C> {
-	fn from_group(group: &'a Group) -> Option<Self>
-	where
-		Self: Sized,
-	{
-		Some(C::from_group(group))
-	}
-}

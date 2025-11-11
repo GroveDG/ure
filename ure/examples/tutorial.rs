@@ -5,9 +5,10 @@ use spin_sleep::sleep;
 use ure::{
 	app::{App, AppProxy, WindowSystem, Windows},
 	gpu::GPU,
+	two::Visuals2D,
 };
 use ure_data::group::{Data, Group};
-use wgpu::CommandEncoderDescriptor;
+use wgpu::{CommandEncoderDescriptor, RenderPassDescriptor};
 use winit::{event_loop::EventLoop, window::WindowAttributes};
 
 #[repr(usize)]
@@ -28,6 +29,7 @@ struct Game {
 	app_proxy: AppProxy,
 	data: Data<GameKey>,
 	window_system: WindowSystem<GameKey>,
+	visuals_2d: Visuals2D<GameKey>,
 }
 
 new_key_type! {
@@ -37,23 +39,35 @@ new_key_type! {
 impl ure::app::Game for Game {
 	fn new(app_proxy: AppProxy) -> Self {
 		let mut data = Data::<GameKey>::with_key();
+
+		let mut window_system = WindowSystem::new(app_proxy.clone());
+
 		let windows = data.insert(RefCell::new(Group::default()));
-		let mut window_system = WindowSystem::default();
-		window_system.add(&data, windows, app_proxy.clone());
+		window_system.add(&data, windows);
+
 		data.get(windows)
 			.unwrap()
 			.borrow_mut()
 			.new_with(1)
 			.add::<Windows>(vec![WindowAttributes::default().with_title("URE")])
 			.done();
+		window_system.inspect_capabilities(&data);
+
+		let format = window_system.surface_format().unwrap();
+		let mut visuals_2d = Visuals2D::new(format);
+
+		let rects = data.insert(RefCell::new(Group::default()));
+		visuals_2d.add(&data, rects);
+
 		Game {
 			app_proxy,
 			window_system,
+			visuals_2d,
 			data,
 		}
 	}
 
-	fn run(mut self) {
+	fn run(self) {
 		let mut frame_start;
 		let mut delta = std::time::Duration::ZERO;
 		'game: loop {
@@ -66,11 +80,15 @@ impl ure::app::Game for Game {
 
 			// ============================== RENDERING ==============================
 			self.window_system.reconfigure(&self.data);
-			let encoder = GPU
+			let mut encoder = GPU
 				.device
 				.create_command_encoder(&CommandEncoderDescriptor::default());
 
 			// RENDER PASSES
+			{
+				let pass = self.visuals_2d.begin_pass(&mut encoder, view);
+				self.visuals_2d.render(&self.data, &mut pass);
+			}
 
 			GPU.queue.submit([encoder.finish()]);
 			self.window_system.present(&self.data);

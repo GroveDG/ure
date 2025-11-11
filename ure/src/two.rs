@@ -1,21 +1,22 @@
 use std::sync::{Arc, LazyLock};
 
-use bitvec::slice::BitSlice;
 use color::palette::css::WHITE;
 use glam::{Affine2, Vec2};
 use itertools::izip;
 use ure_data::{
 	component,
-	components::{CompMut, CompRef, ContMut},
+	components::NewArgs,
 	containers::OneOrMany,
-	group::{Data, NewArgs},
+	glob::{CompMut, CompRef, ContMut, ContRef, Len},
+	group::Data,
 	method::MethodTrait,
 	resource::Resource,
 };
 use wgpu::{
-	BindGroupDescriptor, BindGroupLayout, BufferUsages, FragmentState, MultisampleState,
-	PipelineCompilationOptions, RenderPipeline, RenderPipelineDescriptor, VertexAttribute,
-	VertexBufferLayout, VertexState,
+	BindGroupDescriptor, BindGroupLayout, BufferUsages, CommandEncoder, FragmentState,
+	MultisampleState, PipelineCompilationOptions, PipelineLayout, RenderPass, RenderPassDescriptor,
+	RenderPipeline, RenderPipelineDescriptor, ShaderModule, TextureFormat, TextureView,
+	VertexAttribute, VertexBufferLayout, VertexState,
 	util::{BufferInitDescriptor, DeviceExt},
 };
 
@@ -105,12 +106,12 @@ impl Instance2D {
 	};
 }
 
-component!(pub Colors: Vec<Srgba>, new_colors as fn(_, _), Vec<Srgba>);
+component!(pub Colors: Vec<Srgba>, new_colors, Vec<Srgba>);
 pub fn new_colors(ContMut(mut colors): ContMut<Colors>, args: &mut NewArgs) {
-	if let Some(mut new_colors) = args.take::<Colors>() {
-		colors.append(&mut new_colors);
+	if let Some(new_colors) = args.take::<Colors>() {
+		colors.extend(new_colors);
 	} else {
-		colors.append(&mut vec![WHITE; args.num()]);
+		colors.extend(vec![WHITE; args.len()]);
 	}
 }
 component!(pub Transforms2D: Vec<Affine2>);
@@ -134,13 +135,61 @@ pub fn update_instances_2d(
 	}
 	diff.fill(false);
 }
-component!(pub Meshes2D: OneOrMany<Arc<Mesh2D>>, new_meshes_2d as fn(_, _), Vec<Arc<Mesh2D>>);
+pub fn draw_instances_2d(
+	Len(len): Len,
+	ContRef(instances): ContRef<Instances2D>,
+	CompRef(meshes): CompRef<Meshes2D>,
+	pass: &mut RenderPass<'_>,
+) {
+	pass.set_vertex_buffer(1, instances.buffer().slice(..));
+	match meshes {
+		ure_data::containers::RefOrSlice::Ref(mesh) => {
+			mesh.set(pass);
+			pass.draw_indexed(0..mesh.indices, 0, 0..instances.len() as u32);
+		}
+		ure_data::containers::RefOrSlice::Slice(meshes) => {
+			for i in 0..len {
+				let mesh = &meshes[i];
+				mesh.set(pass);
+				pass.draw_indexed(0..mesh.indices, 0, i as u32..i as u32 + 1);
+			}
+		}
+		ure_data::containers::RefOrSlice::None => {}
+	}
+}
+pub fn draw_glob_instances_2d(
+	ContRef(instances): ContRef<Instances2D>,
+	CompRef(meshes): CompRef<Meshes2D>,
+	(pass, indices): &mut (RenderPass<'_>, &[usize]),
+) {
+	pass.set_vertex_buffer(1, instances.buffer().slice(..));
+	match meshes {
+		ure_data::containers::RefOrSlice::Ref(mesh) => {
+			mesh.set(pass);
+			for i in indices.iter().copied() {
+				pass.draw_indexed(0..mesh.indices, 0, i as u32..i as u32 + 1);
+			}
+		}
+		ure_data::containers::RefOrSlice::Slice(meshes) => {
+			for i in indices.iter().copied() {
+				let mesh = &meshes[i];
+				mesh.set(pass);
+				pass.draw_indexed(0..mesh.indices, 0, i as u32..i as u32 + 1);
+			}
+		}
+		ure_data::containers::RefOrSlice::None => {}
+	}
+}
+component!(pub Meshes2D: OneOrMany<Arc<Mesh2D>>, new_meshes_2d, Vec<Arc<Mesh2D>>);
 pub fn new_meshes_2d(ContMut(mut meshes): ContMut<Meshes2D>, args: &mut NewArgs) {
 	let OneOrMany::Many(vec) = &mut *meshes else {
 		return;
 	};
+	if let Some(args) = args.take::<Meshes2D>() {
+		vec.extend(args);
+	}
 	let empty = EMPTY.load();
-	for _ in 0..args.num() {
+	for _ in 0..args.len() {
 		vec.push(empty.clone());
 	}
 }
@@ -161,56 +210,17 @@ pub static CAMERA_LAYOUT: LazyLock<BindGroupLayout> = LazyLock::new(|| {
 			label: None,
 		})
 });
-pub static PIPELINE: LazyLock<RenderPipeline> = LazyLock::new(|| {
-	let shader = GPU
-		.device
-		.create_shader_module(wgpu::include_wgsl!("two/2d.wgsl"));
 
-	let layout = GPU
-		.device
+pub static SHADER: LazyLock<ShaderModule> = LazyLock::new(|| {
+	GPU.device
+		.create_shader_module(wgpu::include_wgsl!("two/2d.wgsl"))
+});
+pub static LAYOUT: LazyLock<PipelineLayout> = LazyLock::new(|| {
+	GPU.device
 		.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
 			label: None,
 			bind_group_layouts: &[&CAMERA_LAYOUT],
 			push_constant_ranges: &[],
-		});
-
-	GPU.device
-		.create_render_pipeline(&RenderPipelineDescriptor {
-			label: None,
-			layout: Some(&layout),
-			vertex: VertexState {
-				module: &shader,
-				entry_point: Some("vertex"),
-				compilation_options: PipelineCompilationOptions::default(),
-				buffers: &[Vertex2D::LAYOUT, Instance2D::LAYOUT],
-			},
-			fragment: Some(FragmentState {
-				module: &shader,
-				entry_point: Some("fragment"),
-				compilation_options: PipelineCompilationOptions::default(),
-				targets: &[Some(wgpu::ColorTargetState {
-					format: todo!(),
-					blend: Some(wgpu::BlendState::REPLACE),
-					write_mask: wgpu::ColorWrites::ALL,
-				})],
-			}),
-			primitive: wgpu::PrimitiveState {
-				topology: wgpu::PrimitiveTopology::TriangleList,
-				strip_index_format: None,
-				front_face: wgpu::FrontFace::Ccw,
-				cull_mode: Some(wgpu::Face::Back),
-				unclipped_depth: false,
-				polygon_mode: wgpu::PolygonMode::Fill,
-				conservative: false,
-			},
-			depth_stencil: None,
-			multisample: MultisampleState {
-				count: 1,
-				mask: !0,
-				alpha_to_coverage_enabled: false,
-			},
-			multiview: None,
-			cache: None,
 		})
 });
 
@@ -249,11 +259,52 @@ pub static QUAD: Resource<Mesh2D> = Resource::new(|| {
 
 pub struct Visuals2D<Key: slotmap::Key> {
 	keys: Vec<Key>,
+	pipeline: RenderPipeline,
 	camera_buffer: wgpu::Buffer,
 	camera: wgpu::BindGroup,
 }
 impl<Key: slotmap::Key> Visuals2D<Key> {
-	pub fn new() -> Self {
+	pub fn new(format: TextureFormat) -> Self {
+		let pipeline = GPU
+			.device
+			.create_render_pipeline(&RenderPipelineDescriptor {
+				label: None,
+				layout: Some(&LAYOUT),
+				vertex: VertexState {
+					module: &SHADER,
+					entry_point: Some("vertex"),
+					compilation_options: PipelineCompilationOptions::default(),
+					buffers: &[Vertex2D::LAYOUT, Instance2D::LAYOUT],
+				},
+				fragment: Some(FragmentState {
+					module: &SHADER,
+					entry_point: Some("fragment"),
+					compilation_options: PipelineCompilationOptions::default(),
+					targets: &[Some(wgpu::ColorTargetState {
+						format,
+						blend: Some(wgpu::BlendState::REPLACE),
+						write_mask: wgpu::ColorWrites::ALL,
+					})],
+				}),
+				primitive: wgpu::PrimitiveState {
+					topology: wgpu::PrimitiveTopology::TriangleList,
+					strip_index_format: None,
+					front_face: wgpu::FrontFace::Ccw,
+					cull_mode: Some(wgpu::Face::Back),
+					unclipped_depth: false,
+					polygon_mode: wgpu::PolygonMode::Fill,
+					conservative: false,
+				},
+				depth_stencil: None,
+				multisample: MultisampleState {
+					count: 1,
+					mask: !0,
+					alpha_to_coverage_enabled: false,
+				},
+				multiview: None,
+				cache: None,
+			});
+
 		let camera_buffer = GPU.device.create_buffer_init(&BufferInitDescriptor {
 			label: Some("camera"),
 			contents: bytemuck::cast_slice(&glam::Affine2::IDENTITY.to_cols_array()),
@@ -269,39 +320,58 @@ impl<Key: slotmap::Key> Visuals2D<Key> {
 		});
 		Self {
 			keys: Vec::new(),
+			pipeline,
 			camera,
 			camera_buffer,
 		}
 	}
-	pub fn render<'a>(&self, data: &mut Data<Key>, pass: &mut wgpu::RenderPass<'a>) {
-		for key in self.keys {
-			let Some(group) = data.get(key) else {
+	pub fn add(&mut self, data: &Data<Key>, key: Key) {
+		let Some(group) = data.get(key) else {
+			return;
+		};
+		let mut group = group.borrow_mut();
+		group.add_component::<Transforms2D>().unwrap();
+		group.add_component::<Colors>().unwrap();
+		group.add_component::<Instances2D>().unwrap();
+		group.add_component::<Meshes2D>().unwrap();
+		self.keys.push(key);
+	}
+	pub fn begin_pass<'a>(
+		&self,
+		encoder: &'a mut CommandEncoder,
+		view: &TextureView,
+	) -> RenderPass<'a> {
+		encoder.begin_render_pass(&RenderPassDescriptor {
+			label: Some("Visuals 2D"),
+			color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+				view,
+				depth_slice: None,
+				resolve_target: None,
+				ops: wgpu::Operations {
+					load: wgpu::LoadOp::Clear(wgpu::Color {
+						r: 0.0,
+						g: 0.0,
+						b: 0.0,
+						a: 1.0,
+					}),
+					store: wgpu::StoreOp::Store,
+				},
+			})],
+			depth_stencil_attachment: None,
+			timestamp_writes: None,
+			occlusion_query_set: None,
+		})
+	}
+	pub fn render<'a>(&self, data: &Data<Key>, pass: &mut wgpu::RenderPass<'a>) {
+		pass.set_pipeline(&self.pipeline);
+		pass.set_bind_group(0, &self.camera, &[]);
+		for key in self.keys.iter() {
+			let Some(group) = data.get(*key) else {
 				continue;
 			};
 
-			(update_instances_2d as fn(_, _, _)).call_method(&group.borrow(), &mut ());
-			(update_instances_2d as fn(_, _, _)).call_method(&group.borrow(), &mut ());
-		}
-		GPU.queue.write_buffer(
-			&self.instance_buffer,
-			0,
-			bytemuck::cast_slice(unsafe {
-				std::mem::transmute::<&[std::mem::MaybeUninit<Instance2D>], &[Instance2D]>(
-					&data.visual_2d.elements,
-				)
-			}),
-		);
-		pass.set_pipeline(&PIPELINE);
-		pass.set_bind_group(0, &self.camera, &[]);
-		pass.set_vertex_buffer(1, self.instance_buffer.slice(..)); // Instance buffer
-		for span in self.spans.iter().copied() {
-			let mut buffer_position = data.visual_2d.positions[span] as u32;
-			let span = data.get_span(span);
-			for mesh in span.mesh.unwrap().iter() {
-				mesh.set(pass);
-				pass.draw_indexed(0..mesh.indices, 0, buffer_position..buffer_position + 1);
-				buffer_position += 1;
-			}
+			(update_instances_2d as fn(_, _, _)).group_call(&group.borrow(), &mut ());
+			(draw_instances_2d as fn(_, _, _, _)).group_call(&group.borrow(), pass);
 		}
 	}
 }

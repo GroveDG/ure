@@ -102,8 +102,8 @@ impl<T: 'static + Default> NewDefault for Vec<T> {
 impl<T: 'static> NewWith for Vec<T> {
 	type Args = Vec<T>;
 
-	fn new_with(&mut self, mut args: Self::Args) {
-		self.append(&mut args);
+	fn new_with(&mut self, args: Self::Args) {
+		self.extend(args);
 	}
 }
 impl<T: 'static + Hash + Eq> Container for IndexSet<T> {
@@ -125,19 +125,57 @@ impl<T: 'static + Hash + Eq> Container for IndexSet<T> {
 impl<T: 'static + Hash + Eq> NewWith for IndexSet<T> {
 	type Args = IndexSet<T>;
 
-	fn new_with(&mut self, mut args: Self::Args) {
-		self.append(&mut args);
+	fn new_with(&mut self, args: Self::Args) {
+		self.extend(args);
 	}
 }
+#[derive(Debug, Default)]
+pub enum RefOrSlice<'a, T> {
+	Ref(Ref<'a, T>),
+	Slice(Ref<'a, [T]>),
+	#[default]
+	None,
+}
+#[derive(Debug, Default)]
+pub enum RefOrSliceMut<'a, T> {
+	Ref(RefMut<'a, T>),
+	Slice(RefMut<'a, [T]>),
+	#[default]
+	None,
+}
 impl<T: 'static> Container for OneOrMany<T> {
-	type Ref<'a> = Ref<'a, [T]>;
-	type RefMut<'a> = RefMut<'a, [T]>;
+	type Ref<'a> = RefOrSlice<'a, T>;
+	type RefMut<'a> = RefOrSliceMut<'a, T>;
 
 	fn as_ref<'a>(cont: Ref<'a, Self>) -> Self::Ref<'a> {
-		Ref::map(cont, |c| c.as_slice())
+		if cont.is_many() {
+			RefOrSlice::Slice(Ref::map(cont, |c| match c {
+				OneOrMany::Many(items) => items.as_slice(),
+				_ => panic!(),
+			}))
+		} else if cont.is_one() {
+			RefOrSlice::Ref(Ref::map(cont, |c| match c {
+				OneOrMany::One(item) => item.as_ref(),
+				_ => panic!(),
+			}))
+		} else {
+			RefOrSlice::None
+		}
 	}
 	fn as_mut<'a>(cont: RefMut<'a, Self>) -> Self::RefMut<'a> {
-		RefMut::map(cont, |c| c.as_mut_slice())
+		if cont.is_many() {
+			RefOrSliceMut::Slice(RefMut::map(cont, |c| match c {
+				OneOrMany::Many(items) => items.as_mut_slice(),
+				_ => panic!(),
+			}))
+		} else if cont.is_one() {
+			RefOrSliceMut::Ref(RefMut::map(cont, |c| match c {
+				OneOrMany::One(item) => item.as_mut(),
+				_ => panic!(),
+			}))
+		} else {
+			RefOrSliceMut::None
+		}
 	}
 	fn delete(&mut self, indices: &[usize]) {
 		if let OneOrMany::Many(vec) = self {
@@ -155,9 +193,9 @@ impl<T: 'static + Default> NewDefault for OneOrMany<T> {
 impl<T: 'static> NewWith for OneOrMany<T> {
 	type Args = Vec<T>;
 
-	fn new_with(&mut self, mut args: Self::Args) {
+	fn new_with(&mut self, args: Self::Args) {
 		if let OneOrMany::Many(vec) = self {
-			vec.append(&mut args);
+			vec.extend(args);
 		}
 	}
 }
@@ -188,7 +226,7 @@ impl NewDefault for BitVec {
 impl NewWith for BitVec {
 	type Args = BitVec;
 
-	fn new_with(&mut self, mut args: Self::Args) {
-		self.append(&mut args);
+	fn new_with(&mut self, args: Self::Args) {
+		self.extend(args);
 	}
 }

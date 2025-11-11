@@ -10,7 +10,7 @@ use wgpu::{
 	Adapter, Buffer, BufferUsages, CommandEncoder, Device, DeviceDescriptor, Instance,
 	InstanceDescriptor, Queue, RequestAdapterOptions, TextureFormat, wgt::BufferDescriptor,
 };
-use wgpu::{BufferView, BufferViewMut, CommandBuffer};
+use wgpu::{BufferView, BufferViewMut};
 
 pub static GPU: std::sync::LazyLock<Gpu> =
 	std::sync::LazyLock::new(|| futures::executor::block_on(Gpu::new()));
@@ -93,6 +93,12 @@ impl<T: Pod> TypedBuffer<T> {
 		encoder.copy_buffer_to_buffer(&self.inner, 0, &new_buffer, 0, self.inner.size());
 
 		self.inner = new_buffer;
+	}
+	pub fn buffer(&self) -> &Buffer {
+		&self.inner
+	}
+	pub fn len(&self) -> usize {
+		self.len
 	}
 }
 impl<T: Pod> Container for TypedBuffer<T> {

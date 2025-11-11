@@ -1,9 +1,13 @@
-use std::{collections::HashMap, marker::PhantomData};
+use std::{collections::HashMap, error::Error, marker::PhantomData};
 
 use nohash_hasher::BuildNoHashHasher;
 use slotmap::{SlotMap, new_key_type};
 
-use crate::{group::Group, method::Method};
+use crate::{
+	glob::GlobItemRef,
+	group::Group,
+	method::{Method, MethodTrait, TryFromGlob},
+};
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct SignalId<Args>(u64, PhantomData<Args>);
@@ -24,18 +28,18 @@ new_key_type! {
 	pub struct ConnectionId;
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Signal {
-	methods: SlotMap<ConnectionId, Method<()>>,
+	methods: SlotMap<ConnectionId, Box<Method<()>>>,
 }
 impl Signal {
-	pub unsafe fn call<Args>(&self, group: &Group, mut args: Args) {
+	pub unsafe fn call<Args>(&self, glob: GlobItemRef<'_>, mut args: Args) {
 		for method in self.methods.values() {
-			unsafe { std::mem::transmute::<&Method<()>, &Method<Args>>(method) }
-				.call(group, &mut args);
+			let f = unsafe { std::mem::transmute::<&Method<()>, &Method<Args>>(method) };
+			(f)(glob, &mut args);
 		}
 	}
-	pub unsafe fn connect(&mut self, method: Method<()>) -> ConnectionId {
+	pub unsafe fn connect(&mut self, method: Box<Method<()>>) -> ConnectionId {
 		self.methods.insert(method)
 	}
 }
@@ -52,21 +56,28 @@ pub struct Signals {
 	inner: HashMap<u64, Signal, BuildNoHashHasher<u64>>,
 }
 impl Signals {
-	pub fn connect<Args>(&mut self, signal_id: &SignalId<Args>, method: Method<Args>) {
+	pub fn connect<
+		Args,
+		M: for<'a, 'b> Fn(GlobItemRef<'a>, &'b mut Args) -> Result<(), Box<dyn Error>> + 'static,
+	>(
+		&mut self,
+		signal_id: &SignalId<Args>,
+		method: M,
+	) {
+		let method: Box<Method<Args>> = Box::new(method);
+		let method: Box<Method<()>> = unsafe { std::mem::transmute(method) };
 		let Some(signal) = self.inner.get_mut(&signal_id.0) else {
 			let mut signal = Signal::default();
-			unsafe { signal.connect(method.erase()) };
+			unsafe { signal.connect(method) };
 			self.inner.insert(signal_id.0, signal);
 			return;
 		};
-		unsafe {
-			signal.connect(method.erase());
-		}
+		unsafe { signal.connect(method) };
 	}
-	pub fn call<Args>(&self, signal_id: &SignalId<Args>, group: &Group, args: Args) {
+	pub fn call<Args>(&self, signal_id: &SignalId<Args>, glob: GlobItemRef<'_>, args: Args) {
 		let Some(signal) = self.inner.get(&signal_id.0) else {
 			return;
 		};
-		unsafe { signal.call(group, args) };
+		unsafe { signal.call(glob, args) };
 	}
 }

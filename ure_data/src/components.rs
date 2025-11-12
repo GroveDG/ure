@@ -10,7 +10,7 @@ use nohash_hasher::BuildNoHashHasher;
 
 use crate::{
 	containers::{Container, NewDefault},
-	glob::{ContMut, GlobItemRef},
+	glob::{ContMut, GlobuleRef},
 	group::Group,
 	util::all_the_tuples,
 };
@@ -38,8 +38,8 @@ pub trait Component: Sized + ComponentDependency + 'static {
 	type Container: Container;
 
 	type NewArg: Sized + 'static;
-	fn new(glob: GlobItemRef<'_>, args: &mut NewArgs) -> Result<(), Box<dyn Error>>;
-	fn delete(glob: GlobItemRef<'_>, indices: &mut &[usize]) -> Result<(), Box<dyn Error>>;
+	fn new(glob: GlobuleRef<'_, '_>, args: &mut NewArgs) -> Result<(), Box<dyn Error>>;
+	fn delete(glob: GlobuleRef<'_, '_>, indices: &mut &[usize]) -> Result<(), Box<dyn Error>>;
 }
 
 pub struct NewArgs {
@@ -79,10 +79,10 @@ impl $crate::components::Component for $name {
 
 	type NewArg = ();
 
-	fn new<'a>(glob: $crate::glob::GlobItemRef<'a>, args: &mut $crate::components::NewArgs) -> Result<(), Box<dyn std::error::Error>> {
+	fn new(glob: $crate::glob::GlobuleRef<'_, '_>, args: &mut $crate::components::NewArgs) -> Result<(), Box<dyn std::error::Error>> {
 		$crate::components::new_default::<Self>.call_method(glob, args)
 	}
-	fn delete(glob: $crate::glob::GlobItemRef<'_>, indices: &mut &[usize]) -> Result<(), Box<dyn std::error::Error>> {
+	fn delete(glob: $crate::glob::GlobuleRef<'_, '_>, indices: &mut &[usize]) -> Result<(), Box<dyn std::error::Error>> {
 		$crate::components::delete_default::<Self>.call_method(glob, indices)
 	}
 }
@@ -99,10 +99,10 @@ impl $crate::components::Component for $name {
 	type Container = $container;
 
 	type NewArg = ($($new_arg)?);
-	fn new<'a>(glob: $crate::glob::GlobItemRef<'a>, args: &mut $crate::components::NewArgs) -> Result<(), Box<dyn std::error::Error>> {
+	fn new(glob: $crate::glob::GlobuleRef<'_, '_>, args: &mut $crate::components::NewArgs) -> Result<(), Box<dyn std::error::Error>> {
 		($new).call_method(glob, args)
 	}
-	fn delete(glob: $crate::glob::GlobItemRef<'_>, indices: &mut &[usize]) -> Result<(), Box<dyn std::error::Error>> {
+	fn delete(glob: $crate::glob::GlobuleRef<'_, '_>, indices: &mut &[usize]) -> Result<(), Box<dyn std::error::Error>> {
 		$crate::components::delete_default::<Self>.call_method(glob, indices)
 	}
 }

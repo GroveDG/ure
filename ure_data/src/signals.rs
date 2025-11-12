@@ -3,11 +3,7 @@ use std::{collections::HashMap, error::Error, marker::PhantomData};
 use nohash_hasher::BuildNoHashHasher;
 use slotmap::{SlotMap, new_key_type};
 
-use crate::{
-	glob::GlobItemRef,
-	group::Group,
-	method::{Method, MethodTrait, TryFromGlob},
-};
+use crate::{glob::GlobuleRef, method::Method};
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct SignalId<Args>(u64, PhantomData<Args>);
@@ -33,10 +29,10 @@ pub struct Signal {
 	methods: SlotMap<ConnectionId, Box<Method<()>>>,
 }
 impl Signal {
-	pub unsafe fn call<Args>(&self, glob: GlobItemRef<'_>, mut args: Args) {
+	pub unsafe fn call<Args>(&self, glob: GlobuleRef<'_, '_>, mut args: Args) {
 		for method in self.methods.values() {
 			let f = unsafe { std::mem::transmute::<&Method<()>, &Method<Args>>(method) };
-			(f)(glob, &mut args);
+			(f)(glob.clone(), &mut args);
 		}
 	}
 	pub unsafe fn connect(&mut self, method: Box<Method<()>>) -> ConnectionId {
@@ -58,7 +54,7 @@ pub struct Signals {
 impl Signals {
 	pub fn connect<
 		Args,
-		M: for<'a, 'b> Fn(GlobItemRef<'a>, &'b mut Args) -> Result<(), Box<dyn Error>> + 'static,
+		M: for<'a, 'b, 'c> Fn(GlobuleRef<'a, 'b>, &'c mut Args) -> Result<(), Box<dyn Error>> + 'static,
 	>(
 		&mut self,
 		signal_id: &SignalId<Args>,
@@ -74,7 +70,7 @@ impl Signals {
 		};
 		unsafe { signal.connect(method) };
 	}
-	pub fn call<Args>(&self, signal_id: &SignalId<Args>, glob: GlobItemRef<'_>, args: Args) {
+	pub fn call<Args>(&self, signal_id: &SignalId<Args>, glob: GlobuleRef<'_, '_>, args: Args) {
 		let Some(signal) = self.inner.get(&signal_id.0) else {
 			return;
 		};

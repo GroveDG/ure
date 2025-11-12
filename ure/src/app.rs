@@ -8,9 +8,9 @@ use ure_data::{
 	component,
 	components::NewArgs,
 	containers::{IndexSet, One},
-	glob::{CompMut, CompRef, ContMut, Len},
+	glob::{CompMut, CompRef, ContMut, Glob, Len},
 	group::Data,
-	method::{Method, MethodTrait},
+	method::MethodTrait,
 };
 use wgpu::{Surface, SurfaceCapabilities, SurfaceTexture, TextureFormat};
 use winit::{
@@ -102,16 +102,15 @@ pub fn new_surfaces(
 }
 component!(pub SurfaceTextures: Vec<Option<SurfaceTexture>>);
 
-#[derive(Debug)]
 pub struct WindowSystem<Key: slotmap::Key> {
-	keys: Vec<Key>,
+	glob: Glob<Key, WindowId, WindowIds>,
 	proxy: AppProxy,
 	capabilities: Option<SurfaceCapabilities>,
 }
 impl<Key: slotmap::Key> WindowSystem<Key> {
 	pub fn new(proxy: AppProxy) -> Self {
 		Self {
-			keys: Vec::new(),
+			glob: Glob::new(),
 			proxy,
 			capabilities: None,
 		}
@@ -129,12 +128,12 @@ impl<Key: slotmap::Key> WindowSystem<Key> {
 		group.add_component::<WindowSizes>().unwrap();
 		group.add_component::<Surfaces>().unwrap();
 		group.add_component::<SurfaceTextures>().unwrap();
-		self.keys.push(key)
+		self.glob.add_group(key)
 	}
 	/// Call this function AFTER creating windows.
 	pub fn inspect_capabilities(&mut self, data: &Data<Key>) {
 		self.capabilities = Some(
-			data.get(self.keys[0])
+			data.get(self.glob[0])
 				.unwrap()
 				.borrow()
 				.borrow_component::<Surfaces>()
@@ -148,31 +147,25 @@ impl<Key: slotmap::Key> WindowSystem<Key> {
 	}
 	pub fn close(&self, data: &Data<Key>) -> bool {
 		let mut all_closed = true;
-		for key in self.keys.iter().copied() {
-			if let Some(group) = data.get(key) {
-				let mut group = group.borrow_mut();
-				if let Ok(delete) = group.call_method(close_windows, &mut ()) {
-					group.delete(&delete);
-					all_closed &= group.is_empty();
-				}
-			}
+		for mut globule in self.glob.iter_mut(data) {
+			let mut globule_mut = globule.as_mut();
+			let Ok(delete) = globule_mut.call_method(close_windows, &mut ()) else {
+				continue;
+			};
+			let group = globule_mut.group();
+			group.delete(&delete);
+			all_closed &= group.is_empty();
 		}
 		all_closed
 	}
 	pub fn reconfigure(&self, data: &Data<Key>) {
-		for key in self.keys.iter().copied() {
-			if let Some(group) = data.get(key) {
-				let group = group.borrow();
-				group.call_method(reconfigure_surfaces, &mut ());
-			}
+		for globule in self.glob.iter(data) {
+			globule.as_ref().call_method(reconfigure_surfaces, &mut ());
 		}
 	}
 	pub fn present(&self, data: &Data<Key>) {
-		for key in self.keys.iter().copied() {
-			if let Some(group) = data.get(key) {
-				let group = group.borrow();
-				group.call_method(present_surfaces, &mut ());
-			}
+		for globule in self.glob.iter(data) {
+			globule.as_ref().call_method(present_surfaces, &mut ());
 		}
 	}
 }

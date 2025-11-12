@@ -1,19 +1,14 @@
 use std::{
-	any::Any,
 	cell::{Ref, RefCell, RefMut},
-	collections::HashMap,
 	error::Error,
 };
 
-use nohash_hasher::BuildNoHashHasher;
 use slotmap::SlotMap;
 
 use crate::{
-	components::{
-		Component, ComponentDependency, ComponentId, Components, MissingDependency, NewArgs,
-	},
+	components::{Component, ComponentId, Components, MissingDependency, NewArgs},
 	containers::Container,
-	glob::GlobItemRef,
+	glob::GlobuleRef,
 	method::{MethodTrait, TryFromGlob},
 	signal,
 	signals::{SignalId, Signals},
@@ -83,7 +78,7 @@ impl Group {
 	pub fn call_signal<Args>(&mut self, signal: &SignalId<Args>, args: Args) {
 		self.signals.call(&signal, self.glob(), args);
 	}
-	pub fn call_method<'a, T: TryFromGlob<'a>, Args, Return>(
+	pub fn call_method<'a: 'b, 'b, T: TryFromGlob<'a, 'b>, Args, Return>(
 		&'a self,
 		method: impl MethodTrait<T, Args, Return>,
 		args: Args,
@@ -95,7 +90,7 @@ impl Group {
 			return;
 		}
 		self.signals
-			.call(&DELETE, GlobItemRef::from_group(&self), indices);
+			.call(&DELETE, GlobuleRef::from_group(&self), indices);
 		self.len -= indices.len();
 	}
 	pub fn borrow_container<C: Component>(&'_ self) -> Option<Ref<'_, C::Container>> {
@@ -134,8 +129,8 @@ impl Group {
 		}
 		Ok(())
 	}
-	pub fn glob(&self) -> GlobItemRef<'_> {
-		GlobItemRef::from_group(self)
+	pub fn glob(&self) -> GlobuleRef<'_, '_> {
+		GlobuleRef::from_group(self)
 	}
 }
 

@@ -8,7 +8,7 @@ use ure::{
 	two::Visuals2D,
 };
 use ure_data::group::{Data, Group};
-use wgpu::{CommandEncoderDescriptor, RenderPassDescriptor};
+use wgpu::CommandEncoderDescriptor;
 use winit::{event_loop::EventLoop, window::WindowAttributes};
 
 #[repr(usize)]

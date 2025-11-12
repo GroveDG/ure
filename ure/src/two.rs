@@ -370,8 +370,8 @@ impl<Key: slotmap::Key> Visuals2D<Key> {
 				continue;
 			};
 
-			(update_instances_2d as fn(_, _, _)).group_call(&group.borrow(), &mut ());
-			(draw_instances_2d as fn(_, _, _, _)).group_call(&group.borrow(), pass);
+			group.borrow().call_method(update_instances_2d, &mut ());
+			group.borrow().call_method(draw_instances_2d, pass);
 		}
 	}
 }

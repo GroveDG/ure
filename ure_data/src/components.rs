@@ -47,11 +47,20 @@ pub struct NewArgs {
 	args: HashMap<ComponentId, Box<dyn Any>, BuildNoHashHasher<ComponentId>>,
 }
 impl NewArgs {
+	pub fn new(num: usize) -> Self {
+		Self {
+			len: num,
+			args: Default::default(),
+		}
+	}
 	pub const fn len(&self) -> usize {
 		self.len
 	}
 	pub fn take<C: Component>(&mut self) -> Option<C::NewArg> {
 		Some(*self.args.remove(&C::ID)?.downcast().unwrap())
+	}
+	pub fn with<C: Component>(&mut self, arg: C::NewArg) {
+		self.args.insert(C::ID, Box::new(arg));
 	}
 }
 

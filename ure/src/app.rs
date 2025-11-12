@@ -151,9 +151,7 @@ impl<Key: slotmap::Key> WindowSystem<Key> {
 		for key in self.keys.iter().copied() {
 			if let Some(group) = data.get(key) {
 				let mut group = group.borrow_mut();
-				if let Some(delete) =
-					(close_windows as fn(_, _) -> Vec<usize>).group_call(&group, &mut ())
-				{
+				if let Ok(delete) = group.call_method(close_windows, &mut ()) {
 					group.delete(&delete);
 					all_closed &= group.is_empty();
 				}
@@ -165,7 +163,7 @@ impl<Key: slotmap::Key> WindowSystem<Key> {
 		for key in self.keys.iter().copied() {
 			if let Some(group) = data.get(key) {
 				let group = group.borrow();
-				(reconfigure_surfaces as fn(_, _, _, _)).group_call(&group, &mut ());
+				group.call_method(reconfigure_surfaces, &mut ());
 			}
 		}
 	}
@@ -173,7 +171,7 @@ impl<Key: slotmap::Key> WindowSystem<Key> {
 		for key in self.keys.iter().copied() {
 			if let Some(group) = data.get(key) {
 				let group = group.borrow();
-				(present_surfaces as fn(_, _)).group_call(&group, &mut ());
+				group.call_method(present_surfaces, &mut ());
 			}
 		}
 	}

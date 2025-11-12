@@ -48,8 +48,8 @@ impl ure::app::Game for Game {
 		data.get(windows)
 			.unwrap()
 			.borrow_mut()
-			.new_with(1)
-			.add::<Windows>(vec![WindowAttributes::default().with_title("URE")])
+			.new(1)
+			.with::<Windows>(vec![WindowAttributes::default().with_title("URE")])
 			.done();
 		window_system.inspect_capabilities(&data);
 

@@ -20,6 +20,14 @@ pub struct GlobItemRef<'a> {
 	group: &'a Group,
 	indices: Option<&'a [usize]>,
 }
+impl<'a> GlobItemRef<'a> {
+	pub fn from_group(group: &'a Group) -> Self {
+		Self {
+			group,
+			indices: None,
+		}
+	}
+}
 
 impl<GroupKey: slotmap::Key, ItemKey, C> Glob<GroupKey, ItemKey, C>
 where

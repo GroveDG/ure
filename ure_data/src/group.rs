@@ -2,6 +2,7 @@ use std::{
 	any::Any,
 	cell::{Ref, RefCell, RefMut},
 	collections::HashMap,
+	error::Error,
 };
 
 use nohash_hasher::BuildNoHashHasher;
@@ -12,8 +13,10 @@ use crate::{
 		Component, ComponentDependency, ComponentId, Components, MissingDependency, NewArgs,
 	},
 	containers::Container,
+	glob::GlobItemRef,
+	method::{MethodTrait, TryFromGlob},
 	signal,
-	signals::Signals,
+	signals::{SignalId, Signals},
 };
 
 signal!(NEW: NewArgs);
@@ -67,13 +70,34 @@ impl Group {
 	// 	self.signals.call(&NEW, self, args);
 	// 	self.len += num;
 	// }
-	// pub fn delete(&mut self, indices: &[usize]) {
-	// 	if indices.len() == 0 {
-	// 		return;
-	// 	}
-	// 	self.signals.call(&DELETE, self, indices);
-	// 	self.len -= indices.len();
-	// }
+	pub fn new(&mut self, num: usize) -> NewWithArgs<'_> {
+		NewWithArgs {
+			group: self,
+			args: NewArgs::new(num),
+		}
+	}
+	pub fn new_from_args(&mut self, args: NewArgs) {
+		self.len += args.len();
+		self.signals.call(&NEW, self.glob(), args);
+	}
+	pub fn call_signal<Args>(&mut self, signal: &SignalId<Args>, args: Args) {
+		self.signals.call(&signal, self.glob(), args);
+	}
+	pub fn call_method<'a, T: TryFromGlob<'a>, Args, Return>(
+		&'a self,
+		method: impl MethodTrait<T, Args, Return>,
+		args: Args,
+	) -> Result<Return, Box<dyn Error>> {
+		method.call_method(self.glob(), args)
+	}
+	pub fn delete(&mut self, indices: &[usize]) {
+		if indices.len() == 0 {
+			return;
+		}
+		self.signals
+			.call(&DELETE, GlobItemRef::from_group(&self), indices);
+		self.len -= indices.len();
+	}
 	pub fn borrow_container<C: Component>(&'_ self) -> Option<Ref<'_, C::Container>> {
 		self.components.borrow_container::<C>()
 	}
@@ -109,6 +133,24 @@ impl Group {
 			}
 		}
 		Ok(())
+	}
+	pub fn glob(&self) -> GlobItemRef<'_> {
+		GlobItemRef::from_group(self)
+	}
+}
+
+#[must_use]
+pub struct NewWithArgs<'a> {
+	group: &'a mut Group,
+	args: NewArgs,
+}
+impl NewWithArgs<'_> {
+	pub fn with<C: Component>(mut self, arg: C::NewArg) -> Self {
+		self.args.with::<C>(arg);
+		self
+	}
+	pub fn done(self) {
+		self.group.new_from_args(self.args);
 	}
 }
 
